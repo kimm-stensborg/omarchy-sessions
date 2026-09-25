@@ -1,8 +1,8 @@
 import QtQuick
 import qs.Commons
 
-// The strip above the list: the subscriptions side by side, each with its
-// headline and a meter. Expanded (one tool picked), that subscription opens
+// The strip above the list: the subscriptions side by side, each with a
+// line and a meter per allowance that renews. Expanded (one tool picked), that subscription opens
 // into its limits and its per-model split instead.
 Column {
   id: band
@@ -67,45 +67,67 @@ Column {
           width: parent.width
           spacing: Style.space(3)
 
-          Item {
-            width: parent.width
-            height: cellName.implicitHeight
-
-            Caption {
-              id: cellName
-              anchors.left: parent.left
-              anchors.right: cellRenews.left
-              anchors.rightMargin: Style.space(8)
-              text: {
-                if (!cell.provider) return ""
-                var bits = [cell.provider.name]
-                if (cell.provider.tier) bits.push(cell.provider.tier)
-                return bits.join(" · ")
-              }
-              elide: Text.ElideRight
-            }
-
-            Caption {
-              id: cellRenews
-              anchors.right: parent.right
-              text: cell.provider && cell.provider.renews ? cell.provider.renews : ""
-              opacity: 0.6
-            }
-          }
-
           Caption {
             width: parent.width
-            text: cell.provider ? (cell.provider.headline || cell.provider.todayLabel || "") : ""
-            color: cell.provider && cell.provider.alarming ? Color.urgent : band.foreground
-            opacity: cell.provider && cell.provider.alarming ? 1 : 0.6
+            text: {
+              if (!cell.provider) return ""
+              var bits = [cell.provider.name]
+              if (cell.provider.tier) bits.push(cell.provider.tier)
+              return bits.join(" · ")
+            }
             elide: Text.ElideRight
           }
 
-          Meter {
+          // Nothing that renews, as with Grok counted on this machine alone:
+          // what was recorded stands in for the allowance lines.
+          Caption {
+            visible: cell.provider && cell.provider.summary.length === 0
             width: parent.width
-            height: Math.max(2, Style.space(3))
-            share: cell.provider ? cell.provider.meter : 0
-            alarming: cell.provider ? cell.provider.alarming : false
+            text: cell.provider ? cell.provider.todayLabel || "" : ""
+            opacity: 0.6
+            elide: Text.ElideRight
+          }
+
+          Repeater {
+            model: cell.provider ? cell.provider.summary.length : 0
+
+            delegate: Column {
+              id: allowance
+              required property int index
+              readonly property var limit: cell.provider.summary[index]
+              width: cellText.width
+              spacing: Style.space(3)
+
+              Item {
+                width: parent.width
+                height: allowanceUsed.implicitHeight
+
+                Caption {
+                  id: allowanceUsed
+                  anchors.left: parent.left
+                  text: allowance.limit ? allowance.limit.short + " " + allowance.limit.text : ""
+                  color: allowance.limit && allowance.limit.alarming ? Color.urgent : band.foreground
+                  opacity: allowance.limit && allowance.limit.alarming ? 1 : 0.75
+                }
+
+                Caption {
+                  anchors.left: allowanceUsed.right
+                  anchors.leftMargin: Style.space(8)
+                  anchors.right: parent.right
+                  horizontalAlignment: Text.AlignRight
+                  text: allowance.limit ? allowance.limit.reset : ""
+                  opacity: 0.5
+                  elide: Text.ElideLeft
+                }
+              }
+
+              Meter {
+                width: parent.width
+                height: Math.max(2, Style.space(3))
+                share: allowance.limit ? allowance.limit.percent : 0
+                alarming: allowance.limit ? allowance.limit.alarming : false
+              }
+            }
           }
         }
 

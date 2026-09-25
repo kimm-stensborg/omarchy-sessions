@@ -413,6 +413,34 @@ function limitRow(label, short, percent, reset) {
   }
 }
 
+var SPAN_ORDER = ["month", "included", "week", "day", "session"]
+
+// Longest span first, so every tool opens on its week or month, and a
+// limit with no span keeps its place after those.
+function bySpan(limits) {
+  var rank = function(limit) {
+    var at = SPAN_ORDER.indexOf(limit.short)
+    return at < 0 ? SPAN_ORDER.length : at
+  }
+  return limits
+    .map(function(limit, at) { return { limit: limit, at: at } })
+    .sort(function(a, b) { return rank(a.limit) - rank(b.limit) || a.at - b.at })
+    .map(function(entry) { return entry.limit })
+}
+
+// The allowances worth a line of their own at a glance: the ones that
+// renew, like Claude's session and week. Shares inside an allowance, like
+// Grok's Build and Chat, have no renewal of their own and wait for the
+// full view. When nothing carries a renewal the first limit stands in.
+function summaryOf(limits) {
+  var out = []
+  for (var i = 0; i < limits.length; i++) {
+    if (limits[i].reset) out.push(limits[i])
+  }
+  if (!out.length && limits.length) out.push(limits[0])
+  return out
+}
+
 function subscriptionPanel(raw, now) {
   if (!raw || !raw.id) return null
   var limits = []
@@ -423,26 +451,16 @@ function subscriptionPanel(raw, now) {
     limits.push(limitRow(str(source[i].label), shortLimit(source[i].label), percent,
       resetLabel(source[i].resetsAt, now)))
   }
+  limits = bySpan(limits)
   var models = modelRows(raw.models || [])
   var today = Number(raw.todayTokens) || 0
   if (!limits.length && today <= 0 && !models.length) return null
-  // The meter is the fullest allowance, and its renewal is the one shown.
-  var headline = []
-  var fullest = -1
-  for (var h = 0; h < limits.length; h++) {
-    headline.push(limits[h].short + " " + limits[h].text)
-    if (fullest < 0 || limits[h].percent > limits[fullest].percent) fullest = h
-  }
-  var meter = fullest < 0 ? 0 : limits[fullest].percent
   return {
     id: raw.id,
     name: str(raw.name) || toolLabel(raw.id),
     tier: str(raw.tier),
     todayLabel: today > 0 ? "today " + formatTokens(today) : "",
-    headline: headline.join(" · "),
-    renews: fullest < 0 ? "" : limits[fullest].reset,
-    meter: meter,
-    alarming: meter >= 0.9,
+    summary: summaryOf(limits),
     limits: limits,
     models: models
   }
@@ -475,10 +493,7 @@ function cursorPanel(allowance, now) {
     name: "Cursor",
     tier: str(allowance.plan),
     todayLabel: "",
-    headline: "included " + formatPercent(included),
-    renews: limits[0].reset,
-    meter: clamp01(included),
-    alarming: included >= 0.9,
+    summary: summaryOf(limits),
     limits: limits,
     models: []
   }
@@ -526,10 +541,7 @@ function grokPanel(sessions, allowance, now) {
     name: "Grok",
     tier: limits.length ? "" : "on this machine",
     todayLabel: recorded,
-    headline: limits.length ? limits[0].short + " " + limits[0].text : recorded,
-    renews: limits.length ? limits[0].reset : "",
-    meter: limits.length ? limits[0].percent : 0,
-    alarming: limits.length ? limits[0].alarming : false,
+    summary: summaryOf(limits),
     limits: limits,
     models: models
   }

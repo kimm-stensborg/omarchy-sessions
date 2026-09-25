@@ -23,6 +23,11 @@ const NOW = Date.parse("2026-09-25T12:00:00Z")
 let checks = 0
 const failures = []
 
+// A subscription's at-a-glance lines, as the panel reads them.
+function lines(panel) {
+  return panel.summary.map(l => [l.short, l.text, l.reset].filter(Boolean).join(" "))
+}
+
 function check(label, got, want) {
   checks += 1
   const g = JSON.stringify(got)
@@ -149,8 +154,9 @@ const usage = M.usageFrom([
 ], NOW)
 
 check("empty subscriptions drop out, claude stays ahead of grok", usage.map(u => u.id), ["claude", "grok"])
-check("claude headline is the allowances", usage[0].headline, "session 6% · week 29%")
-check("the renewal shown is the fullest allowance's", usage[0].renews, "renews 2 Oct")
+check("claude shows its week above its session, as the other tools lead with theirs", lines(usage[0]),
+  ["week 29% renews 2 Oct", "session 6% renews in 3h"])
+check("the full view lists the week first too", usage[0].limits.map(l => l.label), ["Weekly (7-day)", "Session (5-hour)"])
 check("the heavier model leads and fills the bar", usage[0].models.map(m => [m.name, m.share]), [["Opus 5.5", 1], ["Opus 5", 100 / 303]])
 check("grok cost is the sum of the session files", usage[1].todayLabel, "$1.50 · 3.5K")
 
@@ -164,10 +170,9 @@ const week = M.usageFrom([], [
     { name: "GrokChat", percent: 0.02 }
   ]
 })[0]
-check("the grok row leads with the weekly allowance", week.headline, "week 69%")
+check("grok shows its week; build and chat wait for the full view", lines(week), ["week 69% renews Mon 08:30"])
 check("weekly, build and chat are the limit rows", week.limits.map(l => l.label + " " + l.text), ["Weekly 69%", "Build 67%", "Chat 2%"])
-check("the meter is the weekly share", week.meter, 0.69)
-check("grok renews with its week", week.renews, "renews Mon 08:30")
+check("the meter is the weekly share", week.summary[0].percent, 0.69)
 
 const cursor = M.usageFrom([], [], NOW, null, {
   percent: 7.490909090909091 / 100,
@@ -179,17 +184,23 @@ const cursor = M.usageFrom([], [], NOW, null, {
   ],
   onDemand: "off"
 })[0]
-check("cursor leads with the included share of the monthly plan", [cursor.tier, cursor.headline], ["Pro", "included 7%"])
-check("cursor renews with its month", cursor.renews, "renews Wed 08:54")
+check("cursor shows the included share of the monthly plan", [cursor.tier, lines(cursor)], ["Pro", ["included 7% renews Wed 08:54"]])
 check("auto, api and on-demand follow the included row", cursor.limits.map(l => l.label + " " + l.text),
   ["Included 7%", "Auto 7%", "API 16%", "On-Demand Disabled"])
 check("a plan past its allowance reads past 100%, not near zero", M.usageFrom([], [], NOW, null, {
   percent: 1.2, resetsAt: "", plan: "Pro", products: [], onDemand: "on"
-})[0].headline, "included 120%")
+})[0].summary[0].text, "120%")
 check("a limit near full is marked", M.usageFrom([{
   id: "claude", name: "Claude", todayTokens: 0,
   limits: [{ label: "Weekly", percent: 0.94, resetsAt: "" }], models: []
-}], [], NOW)[0].alarming, true)
+}], [], NOW)[0].summary[0].alarming, true)
+check("with no renewal anywhere the first limit stands in", lines(M.usageFrom([{
+  id: "codex", name: "Codex", todayTokens: 0,
+  limits: [{ label: "Weekly", percent: 0.4, resetsAt: "" }, { label: "Daily", percent: 0.1, resetsAt: "" }], models: []
+}], [], NOW)[0]), ["week 40%"])
+check("grok with only this machine's numbers has no allowance lines", M.usageFrom([], [
+  { models: [{ id: "grok-4.7-build", input: 1000, output: 0, cacheRead: 0, cacheWrite: 0, costTicks: 0 }] }
+], NOW)[0].summary, [])
 
 if (failures.length) {
   console.log(failures.join("\n"))
