@@ -30,6 +30,19 @@ A generated title is shown when the tool wrote one. Otherwise the first line you
 
 At the foot of the panel, a strip of fixed height gives each subscription that has numbers a column, side by side, whichever tool is picked above; the list never moves as the numbers come in. Claude, Codex and Fireworks use the usage records Omarchy writes. Grok's column is the weekly allowance from the same billing figure `/usage` shows, and Cursor's the monthly plan from the same screen as `agent` `/usage`. A subscription with nothing recorded yet is left off the strip. Each allowance that renews gets its own line and meter, with when it renews: a countdown inside a day, the weekday and time inside a week, the date after that. Claude shows its week and, under it, its 5-hour session, so every column opens on its longest allowance. Clicking a column shows only that tool's sessions. Shares inside an allowance (Grok's Build and Chat, Cursor's Auto and API), the last seven days and the split by model are in the bar's popup, described below.
 
+## Deleting a session
+
+Del on a session asks first, naming it; Del or Enter deletes, Esc keeps it. A session that is still running cannot be deleted: the panel will not offer it, and before deleting `scan.py` looks again across every process on the machine, not only the ones in a window, so a session in a background pane or job is safe too.
+
+| Tool | What goes |
+|------|-----------|
+| Claude | the transcript, its subagent folder, and its file history, session environment and todos, to the trash |
+| Grok | the session's folder under `~/.grok/sessions`, to the trash |
+| Cursor | the transcript and the chat `agent --resume` reopens (`~/.config/cursor/chats`), to the trash |
+| Codex | through Codex's own `codex delete`, which is permanent |
+
+Only files named by the session's exact id, under that tool's own folders, are touched. Something deleted by mistake can be restored from the trash.
+
 ## In the bar
 
 The bar widget takes the place of Omarchy's Agents widget: every AI subscription's usage in one bar button and one popup. The button wears the Agents glyph and the share used, both amber from 75% and red from 90%. By default that is whichever allowance is closest to its limit; **In the bar**, at the foot of the popup, steps to one tool instead (the `barTool` setting: `fullest`, `claude`, `grok`, `codex`, `cursor` or `fireworks`).
@@ -81,6 +94,7 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | Up / Down | Move from the newest session towards the oldest and back. It stops at either end rather than wrapping round. Headers are skipped. |
 | Enter | Focus the terminal already running that session, or open one resumed there. |
 | Ctrl+Enter | Start a new conversation with that session's tool, in its folder. |
+| Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted. |
 | Tab / Shift+Tab | Step to the next or previous chip: All, then each tool, and round again. |
 | Click a chip | Show only that tool's sessions. Click it again for all of them. |
 | Click a subscription at the foot | Same as its chip. |
@@ -94,6 +108,7 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | `hyprctl` | seeing which windows are already running a session, and focusing one |
 | `xdg-terminal-exec`, `uwsm` | launching the resume command in the session's own scope |
 | `jq` | `install.sh`, when it checks which shortcuts are free |
+| `gio` (glib2) | moving a deleted session to the trash |
 
 Grok's weekly figure and Cursor's monthly plan are fetched when the panel opens. Everything else is read from disk. `claude`, `grok`, `codex` and `agent` are only needed for the tools you actually resume.
 
@@ -114,7 +129,7 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 | `UsagePanel.qml` | The popup under the bar button. |
 | `UsageBand.qml` | The fixed-height strip of subscriptions at the foot of the Sessions panel. |
 | `Model.js` | Titles, grouping, search, the resume command, and which window is already that session. |
-| `scan.py` | Reading the four tools' session files, the usage cache, and launching or focusing, herdr panes included. |
+| `scan.py` | Reading the four tools' session files, the usage cache, launching or focusing (herdr panes included), and deleting. |
 | `test.js` | `Model.js`. |
 | `test_scan.py` | `scan.py`. |
 | `install.sh` | The shortcut and enabling the plugin. |

@@ -229,6 +229,40 @@ Item {
     clientProc.running = true
   }
 
+  // DEL asks first; a session some process is still running is not offered
+  // at all. scan.py checks again, across every process, before it deletes.
+  property var pendingDelete: null
+
+  function askDelete(row) {
+    if (!row) return
+    if (row.running) {
+      root.flash("Still running; close it first")
+      return
+    }
+    root.pendingDelete = row
+    confirm.selectedIndex = 1
+    confirm.opened = true
+  }
+
+  function cancelDelete() {
+    confirm.opened = false
+    root.pendingDelete = null
+  }
+
+  function confirmDelete() {
+    var row = root.pendingDelete
+    confirm.opened = false
+    if (!row) return
+    deleteProc.pending = row
+    deleteProc.command = root.scanCommand(["delete", row.tool, row.id])
+    deleteProc.running = true
+  }
+
+  function forget(id) {
+    root.sessions = root.sessions.filter(function(session) { return session.id !== id })
+    root.refresh()
+  }
+
   // A new conversation with the row's tool, in the row's folder.
   function startNew(row) {
     var argv = row ? Model.newArgv(row.tool) : null
@@ -332,6 +366,25 @@ Item {
     text: "just now"
   }
 
+  Process {
+    id: deleteProc
+    property var pending: null
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var row = deleteProc.pending
+        var payload = root.parseJson(text)
+        root.pendingDelete = null
+        if (payload && payload.ok === true && row) {
+          root.forget(row.id)
+          root.flash(row.tool === "codex" ? "Deleted" : "Moved to the trash")
+        } else {
+          root.flash(payload && payload.error ? String(payload.error) : "Could not delete it")
+        }
+      }
+    }
+  }
+
   // The window scan Enter does, run once on opening so the list can show
   // which sessions are already running somewhere.
   Process {
@@ -398,7 +451,18 @@ Item {
         Keys.priority: Keys.BeforeItem
 
         Keys.onPressed: function(event) {
-          if (event.key === Qt.Key_Escape) {
+          // While asking, DEL or Enter deletes and Esc cancels; nothing else
+          // reaches the list or the search line.
+          if (confirm.opened) {
+            if (event.key === Qt.Key_Delete) root.confirmDelete()
+            else confirm.handleKey(event)
+            event.accepted = true
+            return
+          }
+          if (event.key === Qt.Key_Delete) {
+            root.askDelete(root.current)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Escape) {
             if (root.queryText) root.setQuery("")
             else root.close()
             event.accepted = true
@@ -775,12 +839,34 @@ Item {
         Text {
           width: parent.width
           textFormat: Text.PlainText
-          text: "enter resumes    ctrl+enter starts new    tab switches tool    esc closes"
+          text: "enter resumes    ctrl+enter starts new    del deletes    tab switches tool    esc closes"
           color: root.foreground
           opacity: 0.35
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }
+      }
+
+      // Asked before a session is deleted. DEL or Enter deletes, Esc cancels.
+      ConfirmDialog {
+        id: confirm
+        anchors.fill: parent
+        message: {
+          var row = root.pendingDelete
+          if (!row) return ""
+          return "Delete \u201c" + row.title + "\u201d?\n"
+            + (row.tool === "codex" ? "Codex deletes it for good." : "It goes to the trash.")
+        }
+        cancelText: "Cancel"
+        confirmText: "Delete"
+        background: root.background
+        foreground: root.foreground
+        selectedBackground: root.selectedBackground
+        selectedText: root.selectedText
+        fontFamily: root.fontFamily
+        cornerRadius: root.cornerRadius
+        onConfirmed: root.confirmDelete()
+        onCanceled: root.cancelDelete()
       }
     }
   }

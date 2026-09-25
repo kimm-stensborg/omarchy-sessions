@@ -232,6 +232,91 @@ class Windows(unittest.TestCase):
             self.assertEqual(scan.cursor_log_conversation(other), "")
 
 
+class Delete(unittest.TestCase):
+    ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    def home_with_everything(self, tmp):
+        home = Path(tmp)
+        project = home / ".claude" / "projects" / "-home-kimm-p"
+        project.mkdir(parents=True)
+        (project / (self.ID + ".jsonl")).write_text("{}", encoding="utf-8")
+        (project / self.ID / "subagents").mkdir(parents=True)
+        (project / "other.jsonl").write_text("{}", encoding="utf-8")
+        (home / ".claude" / "file-history" / self.ID).mkdir(parents=True)
+        (home / ".claude" / "todos").mkdir(parents=True)
+        (home / ".claude" / "todos" / (self.ID + "-agent-1.json")).write_text("[]", encoding="utf-8")
+        (home / ".claude" / "todos" / "someone-else.json").write_text("[]", encoding="utf-8")
+        (home / ".grok" / "sessions" / "%2Fhome" / self.ID).mkdir(parents=True)
+        (home / ".cursor" / "projects" / "home-kimm-p" / "agent-transcripts" / self.ID).mkdir(parents=True)
+        (home / ".config" / "cursor" / "chats" / "abc123" / self.ID).mkdir(parents=True)
+        return home
+
+    def delete(self, tool, home, session_id=None, running=False):
+        gone = []
+        result = scan.delete_session(tool, self.ID if session_id is None else session_id, home,
+                                     running=lambda *_: running, discard=gone.append)
+        return result, sorted(str(p.relative_to(home)) for p in gone)
+
+    def test_claude_takes_its_transcript_and_what_belongs_to_it_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self.home_with_everything(tmp)
+            result, gone = self.delete("claude", home)
+        self.assertEqual(result, {"ok": True, "removed": 4})
+        self.assertEqual(gone, [
+            ".claude/file-history/" + self.ID,
+            ".claude/projects/-home-kimm-p/" + self.ID,
+            ".claude/projects/-home-kimm-p/" + self.ID + ".jsonl",
+            ".claude/todos/" + self.ID + "-agent-1.json",
+        ])
+
+    def test_grok_and_cursor_take_their_folders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self.home_with_everything(tmp)
+            self.assertEqual(self.delete("grok", home)[1], [".grok/sessions/%2Fhome/" + self.ID])
+            self.assertEqual(self.delete("cursor", home)[1], [
+                ".config/cursor/chats/abc123/" + self.ID,
+                ".cursor/projects/home-kimm-p/agent-transcripts/" + self.ID,
+            ])
+
+    def test_a_running_session_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self.home_with_everything(tmp)
+            result, gone = self.delete("claude", home, running=True)
+        self.assertFalse(result["ok"])
+        self.assertEqual(gone, [])
+
+    def test_anything_but_an_id_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = self.home_with_everything(tmp)
+            for bad in ["../../etc", "a/b/c/d/e/f", "*", "", "short"]:
+                result, gone = self.delete("claude", home, session_id=bad)
+                self.assertFalse(result["ok"], bad)
+                self.assertEqual(gone, [])
+
+    def test_codex_goes_through_its_own_command(self):
+        asked = []
+        result = scan.delete_session("codex", self.ID, "/nonexistent", running=lambda *_: False,
+                                     codex=lambda sid: asked.append(sid) or {"ok": True})
+        self.assertEqual((result, asked), ({"ok": True}, [self.ID]))
+
+    def test_a_session_this_process_does_not_know_is_not_running(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(scan.session_running("zzzzzzzz-not-a-real-session-0000", Path(tmp)))
+
+    def test_this_very_session_counts_as_running(self):
+        # The Claude conversation driving these tests has its id in its own
+        # process record, so the real check has to see it as running.
+        by_pid = scan.claude_running(Path.home())
+        parents = scan.process_parents()
+        pid, mine = os.getpid(), []
+        while pid and pid > 1 and not mine:
+            mine = [by_pid[pid]] if pid in by_pid else []
+            pid = parents.get(pid)
+        if not mine:
+            self.skipTest("not run from inside a Claude session")
+        self.assertTrue(scan.session_running(mine[0], Path.home()))
+
+
 class CursorAllowance(unittest.TestCase):
     def test_period_usage_matches_the_agent_screen(self):
         parsed = scan.parse_cursor_allowance({

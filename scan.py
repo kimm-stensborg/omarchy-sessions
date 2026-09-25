@@ -1064,6 +1064,99 @@ def focus(address, pane="", tab="", workspace=""):
     return {"ok": False, "error": error}
 
 
+# A session id as the tools write them: a UUID or something like it. Anything
+# else, a path above all, is refused before a file is looked for.
+SESSION_ID_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z_-]{7,127}")
+
+
+def session_running(session_id, home):
+    """Whether any process on the machine is running this session: on its
+    command line, in a file it has open, or in what Claude and Grok record per
+    process. Every process is looked at, not only those in a window, so a
+    session in a background pane or job counts too."""
+    running = {**claude_running(home), **grok_running(home)}
+    if session_id in running.values():
+        return True
+    for pid in process_parents():
+        if pid == os.getpid():
+            continue
+        for mark in process_marks(pid, running):
+            if session_id in mark:
+                return True
+    return False
+
+
+def session_files(tool, session_id, home):
+    """Everything a tool keeps for one session, found under that tool's own
+    folders by its exact id, and nothing a glob could reach beyond them."""
+    home = Path(home)
+    if tool == "claude":
+        claude = home / ".claude"
+        found = [p for project in subdirs(claude / "projects")
+                 for p in (project / (session_id + ".jsonl"), project / session_id)]
+        found += [claude / "file-history" / session_id, claude / "session-env" / session_id]
+        found += list((claude / "todos").glob(glob_escape(session_id) + "-*.json"))
+    elif tool == "grok":
+        found = [cwd_dir / session_id for cwd_dir in subdirs(home / ".grok" / "sessions")]
+    elif tool == "cursor":
+        found = [project / "agent-transcripts" / session_id for project in subdirs(home / ".cursor" / "projects")]
+        found += [chat / session_id for chat in subdirs(home / ".config" / "cursor" / "chats")]
+    else:
+        return []
+    return [path for path in found if path.exists() and not path.is_symlink()]
+
+
+def glob_escape(text):
+    return re.sub(r"([*?\[])", r"[\1]", text)
+
+
+def trash(path):
+    """Into the desktop's trash, so a slip can be undone from there."""
+    completed = subprocess.run(["gio", "trash", "--", str(path)], check=False, capture_output=True, text=True, timeout=10)
+    if completed.returncode != 0:
+        raise OSError(completed.stderr.strip() or "could not move it to the trash")
+
+
+def delete_session(tool, session_id, home=None, running=session_running, discard=trash, codex=None):
+    """Delete one session, never one that is still running.
+
+    Claude, Grok and Cursor keep plain files, which go to the trash. Codex
+    keeps its sessions in a database, so its own `codex delete` does it.
+    """
+    home = Path(home) if home else home_dir()
+    if tool not in ("claude", "grok", "codex", "cursor"):
+        return {"ok": False, "error": "unknown tool"}
+    if not SESSION_ID_RE.fullmatch(str(session_id or "")):
+        return {"ok": False, "error": "not a session id"}
+    if running(session_id, home):
+        return {"ok": False, "error": "still running; close it first"}
+    if tool == "codex":
+        return (codex or codex_delete)(session_id)
+    paths = session_files(tool, session_id, home)
+    if not paths:
+        return {"ok": False, "error": "nothing found for that session"}
+    try:
+        for path in paths:
+            discard(path)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "removed": len(paths)}
+
+
+def codex_delete(session_id):
+    if shutil.which("codex") is None:
+        return {"ok": False, "error": "codex is not installed"}
+    try:
+        completed = subprocess.run(["codex", "delete", session_id], check=False, capture_output=True,
+                                   text=True, timeout=30, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "error": str(exc)}
+    if completed.returncode != 0:
+        said = (completed.stderr or completed.stdout).strip().splitlines()
+        return {"ok": False, "error": said[-1] if said else "codex delete failed"}
+    return {"ok": True}
+
+
 def main(argv):
     command = argv[1] if len(argv) > 1 else "list"
     args = argv[2:]
@@ -1078,6 +1171,8 @@ def main(argv):
         "launch": lambda: launch(args[0], args[1:]),
         # focus <address> [<pane> <tab> <workspace>]
         "focus": lambda: focus(*(args[:4] or [""])),
+        # delete <tool> <id>
+        "delete": lambda: delete_session(*(args[:2] + ["", ""])[:2]),
     }
     if command not in commands:
         return reply({"ok": False, "error": "unknown command"}, 1)
