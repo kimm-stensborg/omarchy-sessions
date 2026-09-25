@@ -56,6 +56,54 @@ function toolLabel(tool) {
   return str(tool)
 }
 
+// Each tool wears one of the theme's named colours, so a mixed list scans by
+// colour and a theme switch recolours it with everything else.
+var TOOL_COLORS = { claude: "orange", grok: "magenta", codex: "green", cursor: "cyan" }
+
+// `name = "#rrggbb"` lines from a theme's colors.toml, as { name: "#rrggbb" }.
+function themeColors(raw) {
+  var colors = {}
+  var lines = str(raw).split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var match = lines[i].match(/^\s*([A-Za-z0-9_-]+)\s*=\s*["']?(#[0-9A-Fa-f]{6})\b/)
+    if (match) colors[match[1]] = match[2]
+  }
+  return colors
+}
+
+function toolColor(tool, colors, fallback) {
+  var name = TOOL_COLORS[tool]
+  return (name && colors && colors[name]) || fallback
+}
+
+function escapeHtml(text) {
+  return str(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
+// `text` as styled text with every typed word in `color`, so it is plain
+// why a row matched. Overlapping words merge into one run.
+function highlightHtml(text, query, color) {
+  var source = str(text)
+  var words = str(query).trim().toLowerCase().split(/\s+/).filter(function(w) { return w })
+  if (!words.length) return escapeHtml(source)
+  var lower = source.toLowerCase()
+  var marked = []
+  for (var w = 0; w < words.length; w++) {
+    for (var at = lower.indexOf(words[w]); at !== -1; at = lower.indexOf(words[w], at + 1)) {
+      for (var k = at; k < at + words[w].length; k++) marked[k] = true
+    }
+  }
+  var out = ""
+  var open = false
+  for (var i = 0; i < source.length; i++) {
+    if (marked[i] && !open) { out += '<font color="' + color + '">'; open = true }
+    if (!marked[i] && open) { out += "</font>"; open = false }
+    out += escapeHtml(source.charAt(i))
+  }
+  if (open) out += "</font>"
+  return out
+}
+
 // The title worth showing, in the order a person would recognize it.
 // A name the tool generated beats the first line that was typed.
 function titleFrom(raw) {
@@ -147,8 +195,8 @@ function relativeTime(updated, now) {
 // Headers plus the sessions under them. Each folder appears once, placed
 // by its newest session, with its sessions newest first beneath it.
 // `cursor` counts only the sessions, in the order they are shown, which is
-// what the keyboard moves through.
-function rows(sessions, query, tool, now, home) {
+// what the keyboard moves through. `running` marks the ids a window already has.
+function rows(sessions, query, tool, now, home, running) {
   var wanted = str(tool).trim()
   var groups = []
   var groupOf = {}
@@ -171,7 +219,7 @@ function rows(sessions, query, tool, now, home) {
   for (var g = 0; g < groups.length; g++) {
     var members = groupOf[groups[g]]
     var label = labels[groups[g]] || members[0].project
-    out.push({ kind: "header", project: label, cwd: members[0].cwd })
+    out.push({ kind: "header", project: label, cwd: members[0].cwd, count: members.length })
     for (var m = 0; m < members.length; m++) {
       var session = members[m]
       out.push({
@@ -183,7 +231,8 @@ function rows(sessions, query, tool, now, home) {
         cwd: session.cwd,
         title: session.title,
         project: label,
-        when: relativeTime(session.updated, now)
+        when: relativeTime(session.updated, now),
+        running: !!(running && running[session.id])
       })
       cursor += 1
     }
@@ -230,6 +279,17 @@ function matchClient(session, clients) {
     if (text && text.indexOf(id) !== -1 && list[i].address) return list[i]
   }
   return null
+}
+
+// The sessions some window is already running, as { id: true }.
+function runningIds(sessions, clients) {
+  var running = {}
+  var list = sessions || []
+  if (!clients || !clients.length) return running
+  for (var i = 0; i < list.length; i++) {
+    if (matchClient(list[i], clients)) running[list[i].id] = true
+  }
+  return running
 }
 
 // ---------------------------------------------------------------- usage
@@ -409,6 +469,7 @@ function limitRow(label, short, percent, reset) {
     percent: clamp01(percent),
     text: formatPercent(percent),
     reset: reset || "",
+    warning: percent >= 0.75 && percent < 0.9,
     alarming: percent >= 0.9
   }
 }
@@ -485,6 +546,7 @@ function cursorPanel(allowance, now) {
       percent: 0,
       text: "Disabled",
       reset: "",
+      warning: false,
       alarming: false
     })
   }

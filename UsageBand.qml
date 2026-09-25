@@ -14,16 +14,25 @@ Column {
   property color foreground: Color.menu.text
   property color borderColor: Color.menu.border
   property color accent: Color.accent
+  property color warningColor: Color.accent
 
   signal picked(string id)
 
   spacing: Style.space(8)
   visible: band.providers.length > 0
 
-  // A thin track with the used share filled in, red once it is nearly gone.
+  // What a used share is drawn in: amber from three quarters, red near the end.
+  function levelColor(limit, normal) {
+    if (limit && limit.alarming) return Color.urgent
+    if (limit && limit.warning) return band.warningColor
+    return normal
+  }
+
+  // A thin track with the used share filled in, amber and then red as it runs out.
   component Meter: Rectangle {
     property real share: 0
     property bool alarming: false
+    property bool warning: false
     property color fill: band.accent
     property real trackAlpha: 0.28
 
@@ -35,7 +44,7 @@ Column {
       width: parent.width * parent.share
       height: parent.height
       radius: parent.radius
-      color: parent.alarming ? Color.urgent : parent.fill
+      color: parent.alarming ? Color.urgent : parent.warning ? band.warningColor : parent.fill
     }
   }
 
@@ -106,8 +115,8 @@ Column {
                   id: allowanceUsed
                   anchors.left: parent.left
                   text: allowance.limit ? allowance.limit.short + " " + allowance.limit.text : ""
-                  color: allowance.limit && allowance.limit.alarming ? Color.urgent : band.foreground
-                  opacity: allowance.limit && allowance.limit.alarming ? 1 : 0.75
+                  color: band.levelColor(allowance.limit, band.foreground)
+                  opacity: allowance.limit && (allowance.limit.alarming || allowance.limit.warning) ? 1 : 0.75
                 }
 
                 Caption {
@@ -126,6 +135,7 @@ Column {
                 height: Math.max(2, Style.space(3))
                 share: allowance.limit ? allowance.limit.percent : 0
                 alarming: allowance.limit ? allowance.limit.alarming : false
+                warning: allowance.limit ? allowance.limit.warning : false
               }
             }
           }
@@ -209,7 +219,7 @@ Column {
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               text: limitRow.window ? limitRow.window.text : ""
-              color: limitRow.window && limitRow.window.alarming ? Color.urgent : band.foreground
+              color: band.levelColor(limitRow.window, band.foreground)
             }
 
             Meter {
@@ -218,6 +228,7 @@ Column {
               anchors.bottom: parent.bottom
               share: limitRow.window ? limitRow.window.percent : 0
               alarming: limitRow.window ? limitRow.window.alarming : false
+              warning: limitRow.window ? limitRow.window.warning : false
             }
           }
         }

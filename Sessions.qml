@@ -32,6 +32,12 @@ Item {
   property int count: 0
   property var chips: [{ id: "", label: "All" }]
   property var usage: []
+  // Open windows, as scan.py describes them, for marking what already runs.
+  property var clients: []
+  property var themeColors: ({})
+  readonly property color matchColor: root.themeColors.yellow || root.accent
+  readonly property color runningColor: root.themeColors.green || root.accent
+  readonly property color warningColor: root.themeColors.yellow || root.accent
   readonly property var usageShown: {
     if (!root.tool) return root.usage
     for (var i = 0; i < root.usage.length; i++) {
@@ -72,6 +78,8 @@ Item {
   // Row text sits this far inside its highlight. The list reaches out by the
   // same amount, so the text lines up with the search line and chips.
   readonly property int rowInset: Style.space(10)
+  // Sessions sit this far in under their folder; the running dot lives there.
+  readonly property int titleIndent: Style.space(16)
   readonly property int headerRowHeight: Math.max(Style.space(28), Style.font.caption + Style.space(14))
   readonly property int cardWidth: Math.min(Style.space(820), panel.width - Style.gapsOut * 2)
   readonly property int cardHeight: Math.min(Style.space(640), panel.height - Style.gapsOut * 2)
@@ -87,9 +95,14 @@ Item {
     root.viewRows = []
     root.count = 0
     root.usage = []
+    root.clients = []
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    themeFile.reload()
     root.runScan()
     root.runUsage()
+    runningProc.running = false
+    runningProc.command = root.scanCommand(["clients"])
+    runningProc.running = true
   }
 
   function close() {
@@ -97,6 +110,7 @@ Item {
     scanProc.running = false
     usageProc.running = false
     clientProc.running = false
+    runningProc.running = false
   }
 
   function ping() { return "ok" }
@@ -124,7 +138,8 @@ Item {
     }
     if (!stillThere) root.tool = ""
     root.chips = chips
-    var built = Model.rows(root.sessions, root.queryText, root.tool, Date.now(), root.home)
+    var built = Model.rows(root.sessions, root.queryText, root.tool, Date.now(), root.home,
+      Model.runningIds(root.sessions, root.clients))
     root.viewRows = built.rows
     root.count = built.count
     if (root.selected >= root.count) root.selected = Math.max(0, root.count - 1)
@@ -305,6 +320,28 @@ Item {
     text: "just now"
   }
 
+  // The window scan Enter does, run once on opening so the list can show
+  // which sessions are already running somewhere.
+  Process {
+    id: runningProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.clients = root.parseJson(text) || []
+        root.refresh()
+      }
+    }
+  }
+
+  // The theme's named colours, for the tools, matches and warnings. Read
+  // again on every open so a theme switch is picked up.
+  FileView {
+    id: themeFile
+    path: root.home + "/.local/state/omarchy/current/theme/colors.toml"
+    printErrors: false
+    onLoaded: root.themeColors = Model.themeColors(text())
+  }
+
   PointerMoveGate {
     id: pointerGate
     referenceItem: card
@@ -473,15 +510,29 @@ Item {
 
                 radius: root.cornerRadius
                 height: Math.max(Style.space(20), Style.font.caption + Style.space(8))
-                width: chipLabel.implicitWidth + Style.space(18)
+                width: chipLabel.implicitWidth + Style.space(18) + (chipMark.visible ? chipMark.width + Style.space(6) : 0)
                 color: chip.active ? root.selectedBackground : "transparent"
                 border.width: Style.normalBorderWidth
                 border.color: chip.active ? Util.alpha(root.accent, 0.55) : Util.alpha(root.borderColor, 0.28)
 
+                Rectangle {
+                  id: chipMark
+                  visible: chip.entry && chip.entry.id !== ""
+                  width: Style.space(6)
+                  height: width
+                  radius: width / 2
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(9)
+                  anchors.verticalCenter: parent.verticalCenter
+                  color: chip.entry ? Model.toolColor(chip.entry.id, root.themeColors, root.accent) : "transparent"
+                }
+
                 Text {
                   id: chipLabel
                   textFormat: Text.PlainText
-                  anchors.centerIn: parent
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.left: chipMark.visible ? chipMark.right : parent.left
+                  anchors.leftMargin: chipMark.visible ? Style.space(6) : Style.space(9)
                   text: chip.entry ? chip.entry.label : ""
                   color: chip.active ? root.selectedText : root.foreground
                   opacity: chip.active ? 1 : 0.55
@@ -510,14 +561,22 @@ Item {
           foreground: root.foreground
           borderColor: root.borderColor
           accent: root.accent
+          warningColor: root.warningColor
           onPicked: function(id) { root.setTool(id) }
+        }
+
+        Rectangle {
+          visible: usageBand.visible
+          width: parent.width
+          height: Style.normalBorderWidth
+          color: Util.alpha(root.borderColor, 0.2)
         }
 
         Item {
           width: parent.width
           height: Math.max(0, parent.height - root.headerHeight - root.metaLineHeight
             - root.footerHeight - root.contentSpacing * 3
-            - (usageBand.visible ? usageBand.height + root.contentSpacing : 0))
+            - (usageBand.visible ? usageBand.height + Style.normalBorderWidth + root.contentSpacing * 2 : 0))
 
           ListView {
             id: resultList
@@ -542,17 +601,44 @@ Item {
               color: sessionRow.hasCursor ? root.selectedBackground : "transparent"
 
               Text {
+                id: headerName
                 visible: sessionRow.header
-                textFormat: Text.PlainText
+                textFormat: Text.StyledText
                 anchors.left: parent.left
                 anchors.leftMargin: root.rowInset
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: Style.space(2)
-                text: sessionRow.entry ? sessionRow.entry.project : ""
+                text: sessionRow.entry && sessionRow.header
+                  ? Model.highlightHtml(sessionRow.entry.project, root.queryText, root.matchColor)
+                  : ""
                 color: root.foreground
-                opacity: 0.45
+                opacity: 0.65
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
+              }
+
+              Text {
+                visible: sessionRow.header && sessionRow.entry.count > 1
+                textFormat: Text.PlainText
+                anchors.left: headerName.right
+                anchors.leftMargin: Style.space(6)
+                anchors.baseline: headerName.baseline
+                text: sessionRow.entry && sessionRow.header ? String(sessionRow.entry.count) : ""
+                color: root.foreground
+                opacity: 0.35
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              // Already running in a window, so Enter focuses it rather than opening one.
+              Rectangle {
+                visible: !sessionRow.header && sessionRow.entry && sessionRow.entry.running
+                width: Style.space(6)
+                height: width
+                radius: width / 2
+                x: root.rowInset + (root.titleIndent - width) / 2 - Style.space(2)
+                anchors.verticalCenter: parent.verticalCenter
+                color: root.runningColor
               }
 
               Text {
@@ -571,31 +657,50 @@ Item {
                 font.pixelSize: Style.font.caption
               }
 
-              Text {
+              Item {
                 id: rowTool
                 // Picking a tool's chip makes the column say the same thing on every row.
                 visible: !sessionRow.header && root.tool === ""
-                textFormat: Text.PlainText
                 anchors.right: rowWhen.left
                 anchors.rightMargin: Style.space(14)
                 anchors.verticalCenter: parent.verticalCenter
-                width: visible ? toolMetrics.width : 0
-                text: sessionRow.entry && sessionRow.entry.toolLabel ? sessionRow.entry.toolLabel : ""
-                color: root.foreground
-                opacity: 0.5
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
+                width: visible ? toolMetrics.width + Style.space(12) : 0
+                height: parent.height
+
+                Rectangle {
+                  id: toolMark
+                  width: Style.space(6)
+                  height: width
+                  radius: width / 2
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
+                  color: sessionRow.entry ? Model.toolColor(sessionRow.entry.tool, root.themeColors, root.accent) : "transparent"
+                }
+
+                Text {
+                  anchors.left: toolMark.right
+                  anchors.leftMargin: Style.space(6)
+                  anchors.verticalCenter: parent.verticalCenter
+                  textFormat: Text.PlainText
+                  text: sessionRow.entry && sessionRow.entry.toolLabel ? sessionRow.entry.toolLabel : ""
+                  color: root.foreground
+                  opacity: 0.5
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
               }
 
               Text {
                 visible: !sessionRow.header
-                textFormat: Text.PlainText
+                textFormat: Text.StyledText
                 anchors.left: parent.left
-                anchors.leftMargin: root.rowInset
+                anchors.leftMargin: root.rowInset + root.titleIndent
                 anchors.right: rowTool.visible ? rowTool.left : rowWhen.left
                 anchors.rightMargin: Style.space(14)
                 anchors.verticalCenter: parent.verticalCenter
-                text: sessionRow.entry && sessionRow.entry.title ? sessionRow.entry.title : ""
+                text: sessionRow.entry && sessionRow.entry.title
+                  ? Model.highlightHtml(sessionRow.entry.title, root.queryText, root.matchColor)
+                  : ""
                 color: sessionRow.hasCursor ? root.selectedText : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.title
@@ -618,6 +723,19 @@ Item {
                   root.resume(sessionRow.entry)
                 }
               }
+            }
+          }
+
+          // The list goes on below: let it fade out rather than stop mid-row.
+          Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: Style.space(36)
+            visible: root.count > 0 && !resultList.atYEnd
+            gradient: Gradient {
+              GradientStop { position: 0; color: Util.alpha(root.background, 0) }
+              GradientStop { position: 1; color: root.background }
             }
           }
 

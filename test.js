@@ -117,6 +117,24 @@ check("no id in any window is no match", M.matchClient(sessions[0], [
   { address: "0x1", text: "foot\ngrok" }
 ]), null)
 
+check("sessions a window is running are marked on their rows", M.rows(sessions, "", "", NOW, HOME,
+  M.runningIds(sessions, [{ address: "0x2", text: "foot\ngrok --resume g1" }])).rows
+  .filter(r => r.kind === "session").map(r => r.id + (r.running ? "*" : "")), ["g1*", "c1", "x1", "u1"])
+check("a header counts the sessions under it", M.rows(interleaved, "", "", NOW, HOME).rows.filter(r => r.kind === "header").map(r => r.count), [2, 1])
+
+check("typed words are marked, case aside, overlaps merged",
+  M.highlightHtml("Omarchy Arcade launcher", "arc arcade", "#f00"),
+  'Om<font color="#f00">arc</font>hy <font color="#f00">Arcade</font> launcher')
+check("every word is marked, and the text is escaped", M.highlightHtml("<b> & notes", "b note", "#f00"),
+  '&lt;<font color="#f00">b</font>&gt; &amp; <font color="#f00">note</font>s')
+check("no query leaves the text as it was, escaped", M.highlightHtml("a < b", "", "#f00"), "a &lt; b")
+
+const theme = M.themeColors('accent = "#7aa2f7"\norange = "#eb927b"\n# comment\nmagenta="#ad8ee6"\nbad = "nope"')
+check("theme colours are read from colors.toml lines", theme, { accent: "#7aa2f7", orange: "#eb927b", magenta: "#ad8ee6" })
+check("each tool takes its theme colour, or the fallback", [
+  M.toolColor("claude", theme, "#fff"), M.toolColor("grok", theme, "#fff"), M.toolColor("codex", theme, "#fff")
+], ["#eb927b", "#ad8ee6", "#fff"])
+
 check("chips follow the tools that actually have sessions", M.toolsPresent(sessions).map(t => t.id), ["claude", "grok", "codex", "cursor"])
 
 check("token counts", [M.formatTokens(999), M.formatTokens(1000), M.formatTokens(38320700), M.formatTokens(1.48e9)],
@@ -190,6 +208,10 @@ check("auto, api and on-demand follow the included row", cursor.limits.map(l => 
 check("a plan past its allowance reads past 100%, not near zero", M.usageFrom([], [], NOW, null, {
   percent: 1.2, resetsAt: "", plan: "Pro", products: [], onDemand: "on"
 })[0].summary[0].text, "120%")
+check("three quarters used is a warning, not yet an alarm", M.usageFrom([{
+  id: "claude", name: "Claude", todayTokens: 0,
+  limits: [{ label: "Weekly", percent: 0.8, resetsAt: "" }], models: []
+}], [], NOW)[0].summary.map(l => [l.warning, l.alarming]), [[true, false]])
 check("a limit near full is marked", M.usageFrom([{
   id: "claude", name: "Claude", todayTokens: 0,
   limits: [{ label: "Weekly", percent: 0.94, resetsAt: "" }], models: []
