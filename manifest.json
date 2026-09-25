@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.kimm-stensborg.sessions",
+  "name": "Sessions",
+  "version": "0.1.0",
+  "author": "Kimm Stensborg",
+  "license": "MIT",
+  "description": "Find a Claude, Grok, Codex or Cursor session and resume it",
+  "kinds": ["overlay"],
+  "keepLoaded": true,
+  "entryPoints": { "overlay": "Sessions.qml" }
+}

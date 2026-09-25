@@ -1,0 +1,865 @@
+#!/usr/bin/env python3
+"""Find recent Claude, Grok, Codex and Cursor sessions, and resume one.
+
+The panel only needs a title, a directory and an id. Transcripts stay where
+the tool left them. `list` prints those records as JSON. `clients` describes
+open windows well enough to recognize a session that is already running.
+`launch` and `focus` do the two ways of going back to one.
+"""
+
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+CLAUDE_LIMIT = 40
+GROK_LIMIT = 40
+CODEX_LIMIT = 30
+CURSOR_LIMIT = 30
+HEAD_LINES = 400
+TAIL_BYTES = 65536
+MAX_LINE_BYTES = 256 * 1024
+TITLE_CHARS = 160
+
+META_PREFIXES = ("<",)
+USER_QUERY_RE = re.compile(r"<user_query>\s*(.*?)\s*</user_query>", re.DOTALL)
+
+
+def home_dir():
+    return Path(os.environ.get("HOME") or str(Path.home()))
+
+
+def one_line(value, limit=TITLE_CHARS):
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def text_of(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+        return "\n".join(parts)
+    return ""
+
+
+def usable_text(value):
+    text = text_of(value) if not isinstance(value, str) else value
+    # Cursor wraps what was typed in <user_query>, after a timestamp tag.
+    # The tag itself is not the title.
+    match = USER_QUERY_RE.search(text or "")
+    if match:
+        text = match.group(1)
+    text = one_line(text)
+    if not text or text.startswith(META_PREFIXES):
+        return ""
+    return text
+
+
+def load_line(line):
+    if len(line) > MAX_LINE_BYTES:
+        return None
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def claude_raw(path):
+    """cwd, the first real thing the user typed, and any title the file names."""
+    path = Path(path)
+    cwd = ""
+    first_user = ""
+    titles = {"customTitle": "", "aiTitle": "", "summary": ""}
+    title_fields = {
+        "custom-title": "customTitle",
+        "ai-title": "aiTitle",
+        "summary": "summary",
+    }
+    try:
+        size = path.stat().st_size
+        mtime_ms = int(path.stat().st_mtime * 1000)
+    except OSError:
+        return None
+
+    def take(record):
+        nonlocal cwd, first_user
+        if not cwd and isinstance(record.get("cwd"), str):
+            cwd = record["cwd"]
+        field = title_fields.get(record.get("type"))
+        if field and isinstance(record.get(field), str):
+            titles[field] = one_line(record[field])
+        if first_user or record.get("type") != "user":
+            return
+        message = record.get("message")
+        content = message.get("content") if isinstance(message, dict) else record.get("content")
+        first_user = usable_text(content) or first_user
+
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for index, line in enumerate(handle):
+                if index >= HEAD_LINES and first_user and cwd:
+                    break
+                if index >= HEAD_LINES * 4:
+                    break
+                record = load_line(line)
+                if record:
+                    take(record)
+            if size > TAIL_BYTES:
+                handle.seek(max(0, size - TAIL_BYTES))
+                handle.readline()  # the seek lands mid-line
+                for line in handle:
+                    record = load_line(line)
+                    if record:
+                        take(record)
+    except OSError:
+        return None
+
+    if not (first_user or any(titles.values())):
+        return None
+    return {
+        "tool": "claude",
+        "id": path.stem,
+        "cwd": cwd,
+        "updated": mtime_ms,
+        "firstUser": first_user,
+        "customTitle": titles["customTitle"],
+        "aiTitle": titles["aiTitle"],
+        "summary": titles["summary"],
+    }
+
+
+def newest_files(root, limit, match):
+    found = []
+    root = Path(root)
+    if not root.is_dir():
+        return []
+    try:
+        projects = list(root.iterdir())
+    except OSError:
+        return []
+    for project in projects:
+        if not project.is_dir() or project.is_symlink():
+            continue
+        try:
+            children = list(project.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if child.is_symlink() or not child.is_file() or not match(child):
+                continue
+            try:
+                found.append((child.stat().st_mtime, child))
+            except OSError:
+                continue
+    found.sort(key=lambda item: item[0], reverse=True)
+    return [path for _, path in found[:limit]]
+
+
+def claude_project_cwd(project_name, list_dir):
+    """The directory encoded in `~/.claude/projects/-home-kimm-Projects-notes`."""
+    encoded = str(project_name or "")
+    if encoded.startswith("-"):
+        encoded = encoded[1:]
+    return resolve_dashed_path(encoded, list_dir)
+
+
+def claude_sessions(root):
+    sessions = []
+    for path in newest_files(root, CLAUDE_LIMIT, lambda path: path.suffix == ".jsonl"):
+        raw = claude_raw(path)
+        if not raw:
+            continue
+        if not raw.get("cwd"):
+            raw["cwd"] = claude_project_cwd(path.parent.name, fs_list_dir)
+        sessions.append(raw)
+    return sessions
+
+
+def grok_raw(summary_path):
+    summary_path = Path(summary_path)
+    try:
+        data = json.loads(summary_path.read_text(encoding="utf-8"))
+        mtime_ms = int(summary_path.stat().st_mtime * 1000)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    info = data.get("info") if isinstance(data.get("info"), dict) else {}
+    cwd = info.get("cwd") if isinstance(info.get("cwd"), str) else ""
+    if not cwd:
+        cwd = urllib.parse.unquote(summary_path.parent.parent.name)
+    title = one_line(data.get("generated_title") or data.get("session_summary") or "")
+    if not title:
+        return None
+    updated = data.get("last_active_at") or data.get("updated_at") or mtime_ms
+    session_id = info.get("id") if isinstance(info.get("id"), str) and info.get("id") else summary_path.parent.name
+    return {
+        "tool": "grok",
+        "id": session_id,
+        "cwd": cwd,
+        "updated": updated,
+        "generatedTitle": title,
+    }
+
+
+def grok_sessions(root):
+    # Sessions sit two directories down: sessions/<cwd>/<id>/summary.json.
+    sessions = []
+    root = Path(root)
+    if not root.is_dir():
+        return []
+    found = []
+    try:
+        cwd_dirs = list(root.iterdir())
+    except OSError:
+        return []
+    for cwd_dir in cwd_dirs:
+        if not cwd_dir.is_dir() or cwd_dir.is_symlink():
+            continue
+        try:
+            session_dirs = list(cwd_dir.iterdir())
+        except OSError:
+            continue
+        for session_dir in session_dirs:
+            summary = session_dir / "summary.json"
+            if not session_dir.is_dir() or session_dir.is_symlink() or not summary.is_file():
+                continue
+            try:
+                found.append((summary.stat().st_mtime, summary))
+            except OSError:
+                continue
+    found.sort(key=lambda item: item[0], reverse=True)
+    for _, summary in found[:GROK_LIMIT]:
+        raw = grok_raw(summary)
+        if raw:
+            sessions.append(raw)
+    return sessions
+
+
+def resolve_dashed_path(encoded, list_dir):
+    """Turn Cursor's `home-kimm-Projects-omarchy-notes` back into a real path.
+
+    `list_dir(path)` returns the directory names in that path. The longest
+    name that matches the remaining text wins, so `omarchy-notes` stays one
+    directory rather than becoming `omarchy/notes`.
+    """
+    rest = str(encoded or "").strip().strip("-")
+    if not rest:
+        return ""
+    current = "/"
+    while rest:
+        try:
+            names = list(list_dir(current) or [])
+        except OSError:
+            return ""
+        matches = [name for name in names if rest == name or rest.startswith(name + "-")]
+        if not matches:
+            return ""
+        name = max(matches, key=len)
+        current = "/" + name if current == "/" else current.rstrip("/") + "/" + name
+        rest = rest[len(name):]
+        if rest.startswith("-"):
+            rest = rest[1:]
+    return current
+
+
+def fs_list_dir(path):
+    try:
+        return [
+            child.name
+            for child in Path(path).iterdir()
+            if child.is_dir() and not child.is_symlink()
+        ]
+    except OSError:
+        return []
+
+
+def cursor_raw(transcript, encoded, cwd):
+    transcript = Path(transcript)
+    try:
+        mtime_ms = int(transcript.stat().st_mtime * 1000)
+    except OSError:
+        return None
+    first_user = ""
+    try:
+        with transcript.open("r", encoding="utf-8", errors="replace") as handle:
+            for index, line in enumerate(handle):
+                if index >= HEAD_LINES or first_user:
+                    break
+                record = load_line(line)
+                if not record or record.get("role") != "user":
+                    continue
+                message = record.get("message")
+                content = message.get("content") if isinstance(message, dict) else ""
+                first_user = usable_text(content)
+    except OSError:
+        return None
+    if not first_user:
+        return None
+    fallback = encoded.split("-")[-1] if encoded else ""
+    return {
+        "tool": "cursor",
+        "id": transcript.stem,
+        "cwd": cwd,
+        "fallback": "" if cwd else fallback,
+        "updated": mtime_ms,
+        "firstUser": first_user,
+    }
+
+
+def cursor_sessions(root, list_dir=fs_list_dir):
+    root = Path(root)
+    if not root.is_dir():
+        return []
+    found = []
+    try:
+        projects = list(root.iterdir())
+    except OSError:
+        return []
+    for project in projects:
+        transcripts = project / "agent-transcripts"
+        if not transcripts.is_dir() or transcripts.is_symlink():
+            continue
+        try:
+            session_dirs = list(transcripts.iterdir())
+        except OSError:
+            continue
+        for session_dir in session_dirs:
+            if not session_dir.is_dir() or session_dir.is_symlink():
+                continue
+            transcript = session_dir / (session_dir.name + ".jsonl")
+            if not transcript.is_file() or transcript.is_symlink():
+                continue
+            try:
+                found.append((transcript.stat().st_mtime, project.name, transcript))
+            except OSError:
+                continue
+    found.sort(key=lambda item: item[0], reverse=True)
+    sessions = []
+    for _, encoded, transcript in found[:CURSOR_LIMIT]:
+        cwd = resolve_dashed_path(encoded, list_dir)
+        raw = cursor_raw(transcript, encoded, cwd)
+        if raw:
+            sessions.append(raw)
+    return sessions
+
+
+def codex_database(root):
+    root = Path(root)
+    best = None
+    best_version = -1
+    if not root.is_dir():
+        return None
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        return None
+    for child in children:
+        name = child.name
+        if not name.startswith("state_") or not name.endswith(".sqlite"):
+            continue
+        if not child.is_file() or child.is_symlink():
+            continue
+        version = name[len("state_"): -len(".sqlite")]
+        if version.isdigit() and int(version) > best_version:
+            best_version = int(version)
+            best = child
+    return best
+
+
+def codex_sessions(root):
+    database = codex_database(root)
+    if database is None:
+        return []
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=1)
+    except sqlite3.Error:
+        return []
+    try:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(threads)")}
+        required = {"id", "cwd", "archived"}
+        if not required.issubset(columns):
+            return []
+        updated = "updated_at_ms" if "updated_at_ms" in columns else "updated_at" if "updated_at" in columns else None
+        if updated is None:
+            return []
+        title = "title" if "title" in columns else "''"
+        first = "first_user_message" if "first_user_message" in columns else "''"
+        rows = connection.execute(
+            f"SELECT id, cwd, {updated}, {title}, {first} FROM threads "
+            f"WHERE archived = 0 ORDER BY {updated} DESC LIMIT ?",
+            (CODEX_LIMIT,),
+        )
+        sessions = []
+        for session_id, cwd, updated_at, raw_title, first_user in rows:
+            if not isinstance(session_id, str) or not session_id:
+                continue
+            title = one_line(raw_title if isinstance(raw_title, str) else "")
+            first_text = "" if title else one_line(first_user if isinstance(first_user, str) else "")
+            if not title and not first_text:
+                continue
+            sessions.append({
+                "tool": "codex",
+                "id": session_id,
+                "cwd": cwd if isinstance(cwd, str) else "",
+                "updated": updated_at,
+                "title": title,
+                "firstUser": first_text,
+            })
+        return sessions
+    except sqlite3.Error:
+        return []
+    finally:
+        connection.close()
+
+
+def model_bucket(bucket):
+    def num(key, *alts):
+        for name in (key,) + alts:
+            value = bucket.get(name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            if value < 0:
+                return 0
+            return int(value)
+        return 0
+
+    return {
+        "input": num("inputTokens"),
+        "output": num("outputTokens"),
+        "cacheRead": num("cacheReadInputTokens", "cachedReadTokens"),
+        "cacheWrite": num("cacheCreationInputTokens", "cacheCreationTokens"),
+        "costTicks": num("costUsdTicks"),
+    }
+
+
+def slim_subscription(record):
+    models = []
+    for model_id, bucket in (record.get("modelUsage") or {}).items():
+        if isinstance(bucket, dict) and model_id:
+            models.append({"id": str(model_id), **model_bucket(bucket)})
+    limits = []
+    for item in record.get("limits") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            percent = float(item.get("percent"))
+        except (TypeError, ValueError):
+            continue
+        limits.append({
+            "label": str(item.get("label") or ""),
+            "percent": percent,
+            "resetsAt": str(item.get("resetsAt") or ""),
+        })
+    today = record.get("todayTotalTokens") or 0
+    try:
+        today = int(today)
+    except (TypeError, ValueError):
+        today = 0
+    return {
+        "id": str(record.get("id") or ""),
+        "name": str(record.get("name") or record.get("id") or ""),
+        "tier": str(record.get("tierLabel") or ""),
+        "todayTokens": today,
+        "limits": limits,
+        "models": models,
+    }
+
+
+def state_dir(home):
+    configured = os.environ.get("XDG_STATE_HOME")
+    if configured:
+        return Path(configured)
+    return Path(home) / ".local" / "state"
+
+
+def collect_usage(home=None):
+    """Subscription limits Omarchy already collected, plus Grok's own session files.
+
+    Grok has no quota file on disk. Its numbers are the sum of the usage
+    records under ~/.grok/sessions, which is this machine rather than the
+    account. Cursor keeps no usage record here at all.
+    """
+    if home is None:
+        home = home_dir()
+        usage_root = state_dir(home)
+    else:
+        home = Path(home)
+        usage_root = home / ".local" / "state"
+    subscriptions = []
+    usage_dir = usage_root / "omarchy" / "agents" / "usage"
+    if usage_dir.is_dir():
+        for path in sorted(usage_dir.glob("*.json")):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                record = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(record, dict) and record.get("id"):
+                subscriptions.append(slim_subscription(record))
+
+    grok = []
+    root = home / ".grok" / "sessions"
+    if root.is_dir():
+        try:
+            cwd_dirs = list(root.iterdir())
+        except OSError:
+            cwd_dirs = []
+        for cwd_dir in cwd_dirs:
+            if not cwd_dir.is_dir() or cwd_dir.is_symlink():
+                continue
+            try:
+                session_dirs = list(cwd_dir.iterdir())
+            except OSError:
+                continue
+            for session_dir in session_dirs:
+                usage = session_dir / "usage.json"
+                if not session_dir.is_dir() or session_dir.is_symlink() or not usage.is_file() or usage.is_symlink():
+                    continue
+                try:
+                    data = json.loads(usage.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                session = data.get("session") if isinstance(data, dict) else None
+                if not isinstance(session, dict):
+                    continue
+                models = []
+                for model_id, bucket in (session.get("modelUsage") or {}).items():
+                    if isinstance(bucket, dict) and model_id:
+                        models.append({"id": str(model_id), **model_bucket(bucket)})
+                if not models and session.get("primaryModelId"):
+                    models.append({"id": str(session["primaryModelId"]), **model_bucket(session)})
+                if models:
+                    grok.append({"models": models})
+    return {
+        "subscriptions": subscriptions,
+        "grok": grok,
+        "allowance": grok_allowance(home),
+        "cursor": cursor_allowance(home),
+    }
+
+
+def percent_fraction(value):
+    """The billing API reports 69.0 for 69 percent. The panel stores a fraction."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number < 0:
+        return None
+    return number / 100.0
+
+
+def parse_grok_allowance(config):
+    if not isinstance(config, dict) or "creditUsagePercent" not in config:
+        return None
+    percent = percent_fraction(config.get("creditUsagePercent"))
+    if percent is None:
+        return None
+    period = config.get("currentPeriod") if isinstance(config.get("currentPeriod"), dict) else {}
+    resets = period.get("end") or config.get("billingPeriodEnd") or ""
+    products = []
+    for item in config.get("productUsage") or []:
+        if not isinstance(item, dict):
+            continue
+        share = percent_fraction(item.get("usagePercent"))
+        name = item.get("product")
+        if share is None or not name:
+            continue
+        products.append({"name": str(name), "percent": share})
+    return {"percent": percent, "resetsAt": str(resets), "products": products}
+
+
+def allowance_from_log(path):
+    path = Path(path)
+    if not path.is_file():
+        return None
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    text = data[-400_000:].decode("utf-8", "replace")
+    found = None
+    for line in text.splitlines():
+        if "creditUsagePercent" not in line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        ctx = record.get("ctx") if isinstance(record, dict) else None
+        config = ctx.get("config") if isinstance(ctx, dict) else None
+        parsed = parse_grok_allowance(config if isinstance(config, dict) else record)
+        if parsed:
+            found = parsed
+    return found
+
+
+def fetch_grok_allowance(auth_path):
+    auth_path = Path(auth_path)
+    if not auth_path.is_file():
+        return None
+    try:
+        stored = json.loads(auth_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    token = ""
+    if isinstance(stored, dict):
+        for value in stored.values():
+            if isinstance(value, dict) and isinstance(value.get("key"), str):
+                token = value["key"]
+                break
+    if not token:
+        return None
+    request = urllib.request.Request(
+        "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+        headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+        return None
+    config = payload.get("config") if isinstance(payload, dict) else None
+    return parse_grok_allowance(config)
+
+
+def epoch_to_iso(value):
+    if value is None or value == "":
+        return ""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if number > 10_000_000_000:
+        number = number / 1000.0
+    return datetime.fromtimestamp(number, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_cursor_allowance(usage, plan):
+    """The same figures the `agent` /usage screen draws.
+
+    Percents arrive as 7.49 for 7.49 percent. On-demand is off when the
+    account has no personal spend limit.
+    """
+    if not isinstance(usage, dict):
+        return None
+    plan_usage = usage.get("planUsage")
+    if not isinstance(plan_usage, dict) or "totalPercentUsed" not in plan_usage:
+        return None
+    included = percent_fraction(plan_usage.get("totalPercentUsed"))
+    if included is None:
+        return None
+    products = []
+    for key, name in (("autoPercentUsed", "Auto"), ("apiPercentUsed", "API")):
+        share = percent_fraction(plan_usage.get(key))
+        if share is None:
+            continue
+        products.append({"name": name, "percent": share})
+    spend = usage.get("spendLimitUsage") if isinstance(usage.get("spendLimitUsage"), dict) else {}
+    limit = spend.get("individualLimit")
+    on_demand = "on" if isinstance(limit, (int, float)) and not isinstance(limit, bool) and limit > 0 else "off"
+    info = {}
+    if isinstance(plan, dict) and isinstance(plan.get("planInfo"), dict):
+        info = plan["planInfo"]
+    resets = usage.get("billingCycleEnd") or info.get("billingCycleEnd") or ""
+    return {
+        "percent": included,
+        "resetsAt": epoch_to_iso(resets),
+        "plan": str(info.get("planName") or ""),
+        "products": products,
+        "onDemand": on_demand,
+    }
+
+
+def cursor_rpc(token, method):
+    request = urllib.request.Request(
+        "https://api2.cursor.sh/aiserver.v1.DashboardService/" + method,
+        data=b"{}",
+        method="POST",
+        headers={
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+            "Connect-Protocol-Version": "1",
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=8) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return payload if isinstance(payload, dict) else None
+
+
+def fetch_cursor_allowance(auth_path):
+    auth_path = Path(auth_path)
+    if not auth_path.is_file():
+        return None
+    try:
+        stored = json.loads(auth_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    token = stored.get("accessToken") if isinstance(stored, dict) else ""
+    if not isinstance(token, str) or not token:
+        return None
+    try:
+        usage = cursor_rpc(token, "GetCurrentPeriodUsage")
+        plan = cursor_rpc(token, "GetPlanInfo")
+    except (OSError, urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+        return None
+    return parse_cursor_allowance(usage, plan)
+
+
+def cursor_allowance(home):
+    return fetch_cursor_allowance(Path(home) / ".config" / "cursor" / "auth.json")
+
+
+def grok_allowance(home):
+    home = Path(home)
+    live = fetch_grok_allowance(home / ".grok" / "auth.json")
+    if live:
+        return live
+    return allowance_from_log(home / ".grok" / "logs" / "unified.jsonl")
+
+
+def collect(home=None):
+    home = Path(home) if home else home_dir()
+    sessions = []
+    warnings = []
+    readers = (
+        ("claude", lambda: claude_sessions(home / ".claude" / "projects")),
+        ("grok", lambda: grok_sessions(home / ".grok" / "sessions")),
+        ("codex", lambda: codex_sessions(home / ".codex")),
+        ("cursor", lambda: cursor_sessions(home / ".cursor" / "projects")),
+    )
+    for name, read in readers:
+        try:
+            sessions.extend(read())
+        except Exception as exc:  # one tool being unreadable leaves the others
+            warnings.append(f"{name}: {exc}")
+    return {"sessions": sessions, "warnings": warnings}
+
+
+def window_clients():
+    try:
+        completed = subprocess.run(
+            ["hyprctl", "clients", "-j"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        clients = json.loads(completed.stdout or "[]")
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return []
+    if not isinstance(clients, list):
+        return []
+    described = []
+    for client in clients:
+        if not isinstance(client, dict):
+            continue
+        pid = client.get("pid")
+        cmdline = ""
+        cwd = ""
+        if isinstance(pid, int) and pid > 0:
+            try:
+                raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+                cmdline = raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+            except OSError:
+                cmdline = ""
+            try:
+                cwd = os.readlink(f"/proc/{pid}/cwd")
+            except OSError:
+                cwd = ""
+        address = client.get("address")
+        if not isinstance(address, str) or not address:
+            continue
+        described.append({
+            "address": address,
+            "cmdline": cmdline,
+            "cwd": cwd,
+            "title": client.get("title") if isinstance(client.get("title"), str) else "",
+        })
+    return described
+
+
+def launch(cwd, argv):
+    if not argv:
+        return {"ok": False, "error": "nothing to run"}
+    binary = argv[0]
+    if shutil.which(binary) is None and not Path(binary).is_file():
+        return {"ok": False, "error": binary + " is not installed"}
+    command = ["uwsm-app", "--", "xdg-terminal-exec"]
+    if cwd:
+        command.append("--dir=" + cwd)
+    command.extend(argv)
+    try:
+        subprocess.Popen(command, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True}
+
+
+def focus(address):
+    if not address or not str(address).startswith("0x"):
+        return {"ok": False, "error": "not a window"}
+    try:
+        subprocess.Popen(
+            ["hyprctl", "dispatch", "focuswindow", "address:" + address],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True}
+
+
+def main(argv):
+    command = argv[1] if len(argv) > 1 else "list"
+    if command == "list":
+        json.dump(collect(), sys.stdout)
+        sys.stdout.write("\n")
+        return 0
+    if command == "usage":
+        json.dump(collect_usage(), sys.stdout)
+        sys.stdout.write("\n")
+        return 0
+    if command == "clients":
+        json.dump(window_clients(), sys.stdout)
+        sys.stdout.write("\n")
+        return 0
+    if command == "launch":
+        # launch <cwd> <binary> [args...]  — an empty cwd is passed as "".
+        if len(argv) < 4:
+            json.dump({"ok": False, "error": "usage: launch <cwd> <binary> [args...]"}, sys.stdout)
+            return 1
+        json.dump(launch(argv[2], argv[3:]), sys.stdout)
+        sys.stdout.write("\n")
+        return 0
+    if command == "focus":
+        json.dump(focus(argv[2] if len(argv) > 2 else ""), sys.stdout)
+        sys.stdout.write("\n")
+        return 0
+    json.dump({"ok": False, "error": "unknown command"}, sys.stdout)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
