@@ -3,6 +3,9 @@
 //
 //     node test.js
 
+// Renewal times are shown in local time; pin it so the checks read the same anywhere.
+process.env.TZ = "UTC"
+
 const fs = require("fs")
 const path = require("path")
 
@@ -117,7 +120,15 @@ check("model names drop the vendor and join the version", M.friendlyModelName("c
 check("opus 5.5", M.friendlyModelName("claude-opus-5-5"), "Opus 5.5")
 check("grok model name", M.friendlyModelName("grok-4.7-build"), "4.7 Build")
 check("dollars from ticks", M.formatUsdFromTicks(1.5e10), "$1.50")
-check("a reset a few hours out", M.resetLabel("2026-09-25T16:00:00Z", NOW), "resets 4h")
+check("renewals: countdown inside a day, weekday and time inside a week, date after", [
+  M.resetLabel("2026-09-25T12:14:00Z", NOW),
+  M.resetLabel("2026-09-25T16:00:00Z", NOW),
+  M.resetLabel("2026-09-25T14:14:30Z", NOW),
+  M.resetLabel("2026-09-28T08:30:00Z", NOW),
+  M.resetLabel("2026-10-09T08:30:00Z", NOW),
+  M.resetLabel("2026-09-25T11:00:00Z", NOW),
+  M.resetLabel("", NOW)
+], ["renews in 14m", "renews in 4h", "renews in 2h 15m", "renews Mon 08:30", "renews 9 Oct", "renews now", ""])
 
 const usage = M.usageFrom([
   {
@@ -139,6 +150,7 @@ const usage = M.usageFrom([
 
 check("empty subscriptions drop out, claude stays ahead of grok", usage.map(u => u.id), ["claude", "grok"])
 check("claude headline is the allowances", usage[0].headline, "session 6% · week 29%")
+check("the renewal shown is the fullest allowance's", usage[0].renews, "renews 2 Oct")
 check("the heavier model leads and fills the bar", usage[0].models.map(m => [m.name, m.share]), [["Opus 5.5", 1], ["Opus 5", 100 / 303]])
 check("grok cost is the sum of the session files", usage[1].todayLabel, "$1.50 · 3.5K")
 
@@ -155,6 +167,7 @@ const week = M.usageFrom([], [
 check("the grok row leads with the weekly allowance", week.headline, "week 69%")
 check("weekly, build and chat are the limit rows", week.limits.map(l => l.label + " " + l.text), ["Weekly 69%", "Build 67%", "Chat 2%"])
 check("the meter is the weekly share", week.meter, 0.69)
+check("grok renews with its week", week.renews, "renews Mon 08:30")
 
 const cursor = M.usageFrom([], [], NOW, null, {
   percent: 7.490909090909091 / 100,
@@ -167,6 +180,7 @@ const cursor = M.usageFrom([], [], NOW, null, {
   onDemand: "off"
 })[0]
 check("cursor leads with the included share of the monthly plan", [cursor.tier, cursor.headline], ["Pro", "included 7%"])
+check("cursor renews with its month", cursor.renews, "renews Wed 08:54")
 check("auto, api and on-demand follow the included row", cursor.limits.map(l => l.label + " " + l.text),
   ["Included 7%", "Auto 7%", "API 16%", "On-Demand Disabled"])
 check("a plan past its allowance reads past 100%, not near zero", M.usageFrom([], [], NOW, null, {

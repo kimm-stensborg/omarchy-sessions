@@ -8,6 +8,7 @@ var TOOLS = ["claude", "grok", "codex", "cursor"]
 var TITLE_LIMIT = 90
 var LIST_LIMIT = 80
 
+var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 function str(v) {
@@ -282,14 +283,27 @@ function shortLimit(label) {
   return str(label)
 }
 
+function pad2(n) {
+  return n < 10 ? "0" + n : String(n)
+}
+
+// When an allowance renews: a countdown inside a day, the weekday and time
+// inside a week, the date beyond that. Local time, as the clock shows it.
 function resetLabel(iso, now) {
   var at = Date.parse(str(iso))
   if (!isFinite(at)) return ""
-  var delta = at - (now || 0)
-  if (delta <= 0) return "reset"
-  if (delta < 3600000) return "resets " + Math.max(1, Math.round(delta / 60000)) + "m"
-  if (delta < 86400000) return "resets " + Math.round(delta / 3600000) + "h"
-  return "resets " + Math.round(delta / 86400000) + "d"
+  var minutes = Math.round((at - (now || 0)) / 60000)
+  if (minutes <= 0) return "renews now"
+  if (minutes < 60) return "renews in " + minutes + "m"
+  if (minutes < 24 * 60) {
+    var rest = minutes % 60
+    return "renews in " + Math.floor(minutes / 60) + "h" + (rest ? " " + rest + "m" : "")
+  }
+  var date = new Date(at)
+  if (minutes < 7 * 24 * 60) {
+    return "renews " + DAYS[date.getDay()] + " " + pad2(date.getHours()) + ":" + pad2(date.getMinutes())
+  }
+  return "renews " + date.getDate() + " " + MONTHS[date.getMonth()]
 }
 
 function modelWordCase(word) {
@@ -412,18 +426,21 @@ function subscriptionPanel(raw, now) {
   var models = modelRows(raw.models || [])
   var today = Number(raw.todayTokens) || 0
   if (!limits.length && today <= 0 && !models.length) return null
+  // The meter is the fullest allowance, and its renewal is the one shown.
   var headline = []
-  var meter = 0
+  var fullest = -1
   for (var h = 0; h < limits.length; h++) {
     headline.push(limits[h].short + " " + limits[h].text)
-    if (limits[h].percent > meter) meter = limits[h].percent
+    if (fullest < 0 || limits[h].percent > limits[fullest].percent) fullest = h
   }
+  var meter = fullest < 0 ? 0 : limits[fullest].percent
   return {
     id: raw.id,
     name: str(raw.name) || toolLabel(raw.id),
     tier: str(raw.tier),
     todayLabel: today > 0 ? "today " + formatTokens(today) : "",
     headline: headline.join(" · "),
+    renews: fullest < 0 ? "" : limits[fullest].reset,
     meter: meter,
     alarming: meter >= 0.9,
     limits: limits,
@@ -459,6 +476,7 @@ function cursorPanel(allowance, now) {
     tier: str(allowance.plan),
     todayLabel: "",
     headline: "included " + formatPercent(included),
+    renews: limits[0].reset,
     meter: clamp01(included),
     alarming: included >= 0.9,
     limits: limits,
@@ -509,6 +527,7 @@ function grokPanel(sessions, allowance, now) {
     tier: limits.length ? "" : "on this machine",
     todayLabel: recorded,
     headline: limits.length ? limits[0].short + " " + limits[0].text : recorded,
+    renews: limits.length ? limits[0].reset : "",
     meter: limits.length ? limits[0].percent : 0,
     alarming: limits.length ? limits[0].alarming : false,
     limits: limits,

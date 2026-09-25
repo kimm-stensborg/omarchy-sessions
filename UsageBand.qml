@@ -67,15 +67,30 @@ Column {
           width: parent.width
           spacing: Style.space(3)
 
-          Caption {
+          Item {
             width: parent.width
-            text: {
-              if (!cell.provider) return ""
-              var bits = [cell.provider.name]
-              if (cell.provider.tier) bits.push(cell.provider.tier)
-              return bits.join(" · ")
+            height: cellName.implicitHeight
+
+            Caption {
+              id: cellName
+              anchors.left: parent.left
+              anchors.right: cellRenews.left
+              anchors.rightMargin: Style.space(8)
+              text: {
+                if (!cell.provider) return ""
+                var bits = [cell.provider.name]
+                if (cell.provider.tier) bits.push(cell.provider.tier)
+                return bits.join(" · ")
+              }
+              elide: Text.ElideRight
             }
-            elide: Text.ElideRight
+
+            Caption {
+              id: cellRenews
+              anchors.right: parent.right
+              text: cell.provider && cell.provider.renews ? cell.provider.renews : ""
+              opacity: 0.6
+            }
           }
 
           Caption {
