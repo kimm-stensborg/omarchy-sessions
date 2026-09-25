@@ -109,6 +109,9 @@ check("resume commands", {
   cursor: ["agent", "--resume", "u1"]
 })
 
+check("a new conversation starts the tool bare", ["claude", "grok", "codex", "cursor", "other"].map(M.newArgv),
+  [["claude"], ["grok"], ["codex"], ["agent"], null])
+
 check("a window matches only when the session id is among what runs in it", M.matchClient(sessions[0], [
   { address: "0x1", text: "foot --working-directory=/home/kimm/Projects/casino\ngrok" },
   { address: "0x2", text: "foot\nbash\ngrok\ng1" }
@@ -134,6 +137,11 @@ check("theme colours are read from colors.toml lines", theme, { accent: "#7aa2f7
 check("each tool takes its theme colour, or the fallback", [
   M.toolColor("claude", theme, "#fff"), M.toolColor("grok", theme, "#fff"), M.toolColor("codex", theme, "#fff")
 ], ["#eb927b", "#ad8ee6", "#fff"])
+
+const chipRow = [{ id: "" }, { id: "claude" }, { id: "grok" }]
+check("tab steps through the chips and round", [
+  M.nextTool(chipRow, "", 1), M.nextTool(chipRow, "grok", 1), M.nextTool(chipRow, "", -1), M.nextTool(chipRow, "gone", 1)
+], ["claude", "", "grok", "claude"])
 
 check("chips follow the tools that actually have sessions", M.toolsPresent(sessions).map(t => t.id), ["claude", "grok", "codex", "cursor"])
 

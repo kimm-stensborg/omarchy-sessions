@@ -68,6 +68,8 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | Type | Narrows the list. Every word has to match the title, the folder or the tool. |
 | Up / Down | Move from the newest session towards the oldest and back. It stops at either end rather than wrapping round. Headers are skipped. |
 | Enter | Focus the terminal already running that session, or open one resumed there. |
+| Ctrl+Enter | Start a new conversation with that session's tool, in its folder. |
+| Tab / Shift+Tab | Step to the next or previous chip: All, then each tool, and round again. |
 | Click a chip | Show only that tool, and its allowance and models when those exist. Click it again for all of them. |
 | Click a subscription | Same as its chip. |
 | Esc | Clear the line, or close the panel when the line is empty. |

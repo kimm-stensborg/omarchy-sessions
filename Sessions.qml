@@ -210,8 +210,13 @@ Item {
     root.refresh()
   }
 
+  // A click on the chip already picked goes back to all of them.
   function setTool(id) {
-    root.tool = root.tool === id ? "" : id
+    root.showTool(root.tool === id ? "" : id)
+  }
+
+  function showTool(id) {
+    root.tool = id
     root.selected = 0
     pointerGate.reset()
     root.refresh()
@@ -229,6 +234,15 @@ Item {
     clientProc.running = false
     clientProc.command = root.scanCommand(["clients"])
     clientProc.running = true
+  }
+
+  // A new conversation with the row's tool, in the row's folder.
+  function startNew(row) {
+    var argv = row ? Model.newArgv(row.tool) : null
+    if (!argv) return
+    actProc.command = root.scanCommand(["launch", row.cwd || ""].concat(argv))
+    actProc.running = false
+    actProc.running = true
   }
 
   function resumeWithClients(clients) {
@@ -404,8 +418,13 @@ Item {
             root.selectAbsolute(0); event.accepted = true
           } else if (event.key === Qt.Key_End) {
             root.selectAbsolute(root.count - 1); event.accepted = true
+          } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+            var back = event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier)
+            root.showTool(Model.nextTool(root.chips, root.tool, back ? -1 : 1))
+            event.accepted = true
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            root.resume(root.current)
+            if (event.modifiers & Qt.ControlModifier) root.startNew(root.current)
+            else root.resume(root.current)
             event.accepted = true
           } else if (event.key === Qt.Key_Backspace) {
             root.setQuery(root.queryText.slice(0, -1))
@@ -758,7 +777,7 @@ Item {
         Text {
           width: parent.width
           textFormat: Text.PlainText
-          text: "enter resumes    esc closes"
+          text: "enter resumes    ctrl+enter starts new    tab switches tool    esc closes"
           color: root.foreground
           opacity: 0.35
           font.family: root.fontFamily

@@ -251,6 +251,18 @@ function toolsPresent(sessions) {
   return out
 }
 
+// The chip `delta` steps from the current one, round the ends, so Tab and
+// Shift+Tab cycle All and each tool.
+function nextTool(chips, current, delta) {
+  var list = chips || []
+  if (!list.length) return ""
+  var at = 0
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].id === current) at = i
+  }
+  return list[((at + delta) % list.length + list.length) % list.length].id
+}
+
 // What to run inside the terminal. Grok keeps its sessions per directory,
 // so the directory goes on the command as well as on the terminal.
 function resumeArgv(session) {
@@ -263,6 +275,16 @@ function resumeArgv(session) {
   }
   if (session.tool === "codex") return ["codex", "resume", session.id]
   if (session.tool === "cursor") return ["agent", "--resume", session.id]
+  return null
+}
+
+// A fresh conversation with the same tool, for Ctrl+Enter. The terminal is
+// opened in the session's directory, which is where each tool starts.
+function newArgv(tool) {
+  if (tool === "claude") return ["claude"]
+  if (tool === "grok") return ["grok"]
+  if (tool === "codex") return ["codex"]
+  if (tool === "cursor") return ["agent"]
   return null
 }
 
@@ -634,3 +656,4 @@ function usageFrom(subscriptions, grokSessions, now, allowance, cursorAllowance)
   })
   return panels
 }
+
