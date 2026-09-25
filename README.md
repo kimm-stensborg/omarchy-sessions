@@ -30,7 +30,17 @@ A generated title is shown when the tool wrote one. Otherwise the first line you
 
 Above the list, each subscription that has numbers gets a column, side by side. Claude, Codex and Fireworks use the usage records Omarchy already writes for its agents panel: the allowance used, when it renews, today's tokens, and the per-model split. Click it, or the tool's chip, and its allowances and that split open in full. Grok's column is the weekly allowance from the same billing figure `/usage` shows, and under it the Build and Chat shares of that week. The model lines under Grok stay the sum of the session files on this machine. Cursor's column is the monthly plan from the same screen as `agent` `/usage`: the included percent, Auto and API inside it, and whether on-demand is on. A subscription with nothing recorded yet is left off the strip. Each allowance that renews gets its own line and meter, with when it renews: a countdown inside a day, the weekday and time inside a week, the date after that. Claude shows its week and, under it, its 5-hour session that way, so every column opens on its longest allowance. Shares inside an allowance, like Grok's Build and Chat or Cursor's Auto and API, wait for the full view.
 
-The bar widget shows the fullest allowance of any subscription as a small meter and a percent, amber from 75% and red from 90%. Hover it for every allowance and when it renews; click it to open Sessions. Enabling the plugin puts it on the bar. Its numbers come from a cache at `~/.cache/omarchy/sessions/usage.json`, which the bars refresh every five minutes and the panel refreshes whenever it opens, so every monitor's bar and the panel agree and Grok and Cursor are asked once however many bars there are.
+## In the bar
+
+The bar widget takes the place of Omarchy's Agents widget: every AI subscription's usage in one bar button and one popup. The button shows a tool's colour, a small meter and the share used, amber from 75% and red from 90%. By default that is whichever allowance is closest to its limit; **Show in bar**, at the foot of the popup, picks one tool instead (the `barTool` setting: `fullest`, `claude`, `grok`, `codex`, `cursor` or `fireworks`). Hover it for every allowance and when it renews.
+
+Left click opens the popup, one tool at a time: its allowances and when each renews, today's prompts and sessions, tokens for each of the last seven days, and the split by model. Middle click opens the Sessions search. In the popup, `h` / `l` or the arrows switch tool, `r` refreshes, `s` opens Sessions, Esc closes. A key can open it too:
+
+```bash
+omarchy-shell io.github.kimm-stensborg.sessions.usage toggle
+```
+
+Enabling the plugin puts the button on the bar. Take Agents off it with `omarchy plugin disable omarchy.agents`; Sessions runs Omarchy's collector (`omarchy-agent-usage-update`) itself, so the Claude, Codex and Fireworks numbers keep coming. Everything is read from a cache at `~/.cache/omarchy/sessions/usage.json`, which the bars refresh every five minutes and the Sessions panel whenever it opens, so every monitor and the panel agree and Grok and Cursor are asked once however many bars there are. Cross-machine syncing, which Agents offers, is not carried over.
 
 Opening the panel asks `cli-chat-proxy.grok.com` for Grok's weekly figure, using the sign-in in `~/.grok/auth.json`, and `api2.cursor.sh` for Cursor's, using `~/.config/cursor/auth.json`. If the Grok request fails, the newest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl` is used instead.
 
@@ -100,8 +110,9 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 | File | Owns |
 |------|------|
 | `Sessions.qml` | The panel: search line, chips and the session list. |
-| `BarWidget.qml` | The bar button: the fullest allowance, its tooltip, and the five-minute refresh. |
-| `UsageBand.qml` | The subscription rows above the list, and their limits and models when opened. |
+| `BarWidget.qml` | The bar button, its setting and tooltip, the five-minute refresh, and the popup's key. |
+| `UsagePanel.qml` | The popup under the bar button. |
+| `UsageBand.qml` | The subscriptions side by side, and one opened in full: limits, the last seven days, models. |
 | `Model.js` | Titles, grouping, search, the resume command, and which window is already that session. |
 | `scan.py` | Reading the four tools' session files, the usage cache, and launching or focusing, herdr panes included. |
 | `test.js` | `Model.js`. |

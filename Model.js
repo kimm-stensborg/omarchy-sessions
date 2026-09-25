@@ -399,6 +399,47 @@ function resetLabel(iso, now) {
   return "renews " + date.getDate() + " " + MONTHS[date.getMonth()]
 }
 
+function localDate(ms) {
+  var d = new Date(ms)
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate())
+}
+
+// The last seven days, oldest first and ending today, from [{ date, tokens }]
+// records. A day with nothing recorded is there with nothing, so the rows
+// always read as a week.
+function dayRows(days, now) {
+  var byDate = {}
+  var list = days || []
+  for (var i = 0; i < list.length; i++) {
+    if (!list[i] || !list[i].date) continue
+    byDate[list[i].date] = (byDate[list[i].date] || 0) + (Number(list[i].tokens) || 0)
+  }
+  var rows = []
+  var max = 0
+  var any = false
+  for (var back = 6; back >= 0; back--) {
+    var at = (now || 0) - back * 86400000
+    var date = localDate(at)
+    var tokens = byDate[date] || 0
+    if (tokens > 0) any = true
+    if (tokens > max) max = tokens
+    rows.push({ date: date, day: DAYS[new Date(at).getDay()], tokens: tokens, today: back === 0 })
+  }
+  if (!any) return []
+  for (var r = 0; r < rows.length; r++) {
+    rows[r].label = rows[r].tokens > 0 ? formatTokens(rows[r].tokens) : ""
+    rows[r].share = max > 0 ? rows[r].tokens / max : 0
+  }
+  return rows
+}
+
+function activityLabel(prompts, sessions) {
+  var bits = []
+  if (prompts > 0) bits.push(prompts + (prompts === 1 ? " prompt" : " prompts"))
+  if (sessions > 0) bits.push(sessions + (sessions === 1 ? " session" : " sessions"))
+  return bits.join(" · ")
+}
+
 function modelWordCase(word) {
   if (word === "gpt") return "GPT"
   if (word === "deepseek") return "DeepSeek"
@@ -556,7 +597,11 @@ function subscriptionPanel(raw, now) {
     todayLabel: today > 0 ? "today " + formatTokens(today) : "",
     summary: summaryOf(limits),
     limits: limits,
-    models: models
+    models: models,
+    days: dayRows(raw.days, now),
+    activity: activityLabel(Number(raw.todayPrompts) || 0, Number(raw.todaySessions) || 0),
+    status: str(raw.status),
+    help: str(raw.help)
   }
 }
 
@@ -590,7 +635,11 @@ function cursorPanel(allowance, now) {
     todayLabel: "",
     summary: summaryOf(limits),
     limits: limits,
-    models: []
+    models: [],
+    days: [],
+    activity: "",
+    status: "",
+    help: ""
   }
 }
 
@@ -638,8 +687,26 @@ function grokPanel(sessions, allowance, now) {
     todayLabel: recorded,
     summary: summaryOf(limits),
     limits: limits,
-    models: models
+    models: models,
+    days: dayRows(grokDays(source), now),
+    activity: "",
+    status: "",
+    help: ""
   }
+}
+
+// Grok's session files, as tokens on the day each session was last active.
+function grokDays(sessions) {
+  var days = []
+  for (var i = 0; i < sessions.length; i++) {
+    var session = sessions[i]
+    if (!session || !session.day) continue
+    var tokens = 0
+    var models = session.models || []
+    for (var m = 0; m < models.length; m++) tokens += bucketTotal(models[m])
+    days.push({ date: session.day, tokens: tokens })
+  }
+  return days
 }
 
 // One entry per subscription that has a limit or any recorded tokens.
@@ -668,24 +735,49 @@ function usageFrom(subscriptions, grokSessions, now, allowance, cursorAllowance)
   return panels
 }
 
-// What the bar shows: the fullest allowance of any subscription, so the one
-// about to run out is the one in view, and every allowance in the tooltip.
-function barSummary(panels) {
+var BAR_FULLEST = "fullest"
+
+// What the bar can be set to show: whichever allowance is fullest, or one
+// tool's own, for each tool that has an allowance.
+function barChoices(panels) {
+  var out = [{ id: BAR_FULLEST, label: "Fullest" }]
   var list = panels || []
+  for (var i = 0; i < list.length; i++) {
+    if ((list[i].summary || []).length) out.push({ id: list[i].id, label: toolLabel(list[i].id) })
+  }
+  return out
+}
+
+// What the bar shows: the fullest allowance of the chosen tool, or of any
+// tool when the choice is "fullest" or names one with nothing to show, and
+// every allowance in the tooltip.
+function barSummary(panels, choice) {
+  var list = panels || []
+  var wanted = str(choice) || BAR_FULLEST
   var fullest = null
   var owner = null
+  var fallback = null
+  var fallbackOwner = null
   var tooltip = []
   for (var i = 0; i < list.length; i++) {
     var lines = list[i].summary || []
     var parts = []
     for (var l = 0; l < lines.length; l++) {
       parts.push(lines[l].short + " " + lines[l].text + (lines[l].reset ? " (" + lines[l].reset + ")" : ""))
-      if (!fullest || lines[l].percent > fullest.percent) {
+      if (!fallback || lines[l].percent > fallback.percent) {
+        fallback = lines[l]
+        fallbackOwner = list[i]
+      }
+      if (list[i].id === wanted && (!fullest || lines[l].percent > fullest.percent)) {
         fullest = lines[l]
         owner = list[i]
       }
     }
     if (parts.length) tooltip.push(list[i].name + ": " + parts.join(", "))
+  }
+  if (!fullest) {
+    fullest = fallback
+    owner = fallbackOwner
   }
   if (!fullest) return null
   return {

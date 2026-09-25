@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "Kimm Stensborg",
   "license": "MIT",
-  "description": "Find a Claude, Grok, Codex or Cursor session and resume it",
+  "description": "Find a Claude, Grok, Codex or Cursor session and resume it, and every AI subscription's usage in the bar",
   "kinds": [
     "overlay",
     "bar-widget"
@@ -16,10 +16,30 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Sessions",
-    "description": "The fullest AI subscription allowance at a glance; opens Sessions",
-    "category": "System",
+    "displayName": "AI usage",
+    "description": "Every AI subscription's allowances, renewals and recent tokens in one bar panel, in place of Agents",
+    "category": "AI",
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "barTool": "fullest"
+    },
+    "schema": [
+      {
+        "key": "barTool",
+        "type": "enum",
+        "label": "Shown in the bar",
+        "options": [
+          "fullest",
+          "claude",
+          "grok",
+          "codex",
+          "cursor",
+          "fireworks"
+        ],
+        "defaultValue": "fullest",
+        "description": "Whichever allowance is closest to its limit, or one tool's own."
+      }
+    ]
   }
 }

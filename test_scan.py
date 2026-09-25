@@ -3,11 +3,16 @@
 
 import json
 import os
+import time
 import tempfile
 import unittest
 from pathlib import Path
 
 import scan
+
+# Session days are local dates; pin the zone so the checks read the same anywhere.
+os.environ["TZ"] = "UTC"
+time.tzset()
 
 
 class DashedPath(unittest.TestCase):
@@ -307,6 +312,12 @@ class Usage(unittest.TestCase):
                 "name": "Claude",
                 "tierLabel": "Max 5x",
                 "todayTotalTokens": 1000,
+                "todayPrompts": 12,
+                "todaySessions": 2,
+                "recentDays": [{"date": "2026-09-24", "messageCount": 400}, {"date": "2026-09-25", "messageCount": 1000}],
+                "ready": False,
+                "usageStatusText": "Limits unavailable",
+                "authHelpText": "Run `claude auth login`.",
                 "limits": [{"label": "Weekly (7-day)", "percent": 0.29, "resetsAt": "2026-10-01T00:00:00Z"}],
                 "modelUsage": {"claude-opus-5": {
                     "inputTokens": 10, "outputTokens": 20,
@@ -315,6 +326,7 @@ class Usage(unittest.TestCase):
             }), encoding="utf-8")
             session = home / ".grok" / "sessions" / "cwd" / "abc"
             session.mkdir(parents=True)
+            (session / "summary.json").write_text(json.dumps({"last_active_at": "2026-09-25T11:50:00Z"}), encoding="utf-8")
             (session / "usage.json").write_text(json.dumps({
                 "session": {"modelUsage": {"grok-4.7-build": {
                     "inputTokens": 5, "outputTokens": 6, "cachedReadTokens": 7, "costUsdTicks": 20000000000,
@@ -326,6 +338,11 @@ class Usage(unittest.TestCase):
         self.assertEqual(found["subscriptions"][0]["tier"], "Max 5x")
         self.assertEqual(found["grok"][0]["models"][0]["costTicks"], 20000000000)
         self.assertEqual(found["grok"][0]["models"][0]["cacheRead"], 7)
+        self.assertEqual(found["grok"][0]["day"], "2026-09-25")
+        claude = found["subscriptions"][0]
+        self.assertEqual(claude["days"], [{"date": "2026-09-24", "tokens": 400}, {"date": "2026-09-25", "tokens": 1000}])
+        self.assertEqual([claude["todayPrompts"], claude["todaySessions"]], [12, 2])
+        self.assertEqual([claude["status"], claude["help"]], ["Limits unavailable", "Run `claude auth login`."])
 
 
 if __name__ == "__main__":

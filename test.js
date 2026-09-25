@@ -248,6 +248,26 @@ check("the bar shows the fullest allowance of any subscription", [bar.tool, bar.
 check("the bar's tooltip lists every allowance", bar.tooltip,
   "Claude Code: week 32% (renews Sun 03:00), session 28% (renews in 1h 20m)\nGrok: week 79% (renews Mon 08:30)")
 check("no allowances leaves the bar empty", M.barSummary([]), null)
+const both = M.usageFrom([{
+  id: "claude", name: "Claude Code", todayTokens: 0, models: [],
+  limits: [{ label: "Weekly (7-day)", percent: 0.32, resetsAt: "2026-09-27T03:00:00Z" }]
+}], [], NOW, { percent: 0.79, resetsAt: "2026-09-28T08:30:00Z", products: [] })
+check("the bar can be set to one tool", [M.barSummary(both, "claude").tool, M.barSummary(both, "claude").text], ["claude", "32%"])
+check("a tool with nothing to show falls back to the fullest", M.barSummary(both, "cursor").tool, "grok")
+check("the choices are fullest and each tool with an allowance", M.barChoices(both).map(c => c.id), ["fullest", "claude", "grok"])
+
+const week7 = M.dayRows([
+  { date: "2026-09-25", tokens: 1000 }, { date: "2026-09-23", tokens: 400 }, { date: "2026-09-23", tokens: 100 },
+  { date: "2026-09-10", tokens: 9999 }
+], NOW)
+check("seven days, oldest first, ending today", week7.map(d => d.day), ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"])
+check("a day's records add up and scale to the busiest day", week7.map(d => [d.label, d.share, d.today]).slice(4),
+  [["500", 0.5, false], ["", 0, false], ["1K", 1, true]])
+check("no tokens in the week is no chart", M.dayRows([{ date: "2026-09-10", tokens: 5 }], NOW), [])
+check("today's prompts and sessions", M.activityLabel(410, 1), "410 prompts · 1 session")
+check("grok's days come from its session files", M.usageFrom([], [
+  { day: "2026-09-25", models: [{ id: "grok-4.7-build", input: 1000, output: 500, cacheRead: 0, cacheWrite: 0 }] }
+], NOW)[0].days.slice(-1)[0].label, "1.5K")
 
 if (failures.length) {
   console.log(failures.join("\n"))

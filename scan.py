@@ -447,6 +447,13 @@ def models_from(model_usage):
     ]
 
 
+def whole(value):
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def slim_subscription(record):
     models = models_from(record.get("modelUsage"))
     limits = []
@@ -462,16 +469,22 @@ def slim_subscription(record):
             "percent": percent,
             "resetsAt": str(item.get("resetsAt") or ""),
         })
-    today = record.get("todayTotalTokens") or 0
-    try:
-        today = int(today)
-    except (TypeError, ValueError):
-        today = 0
+    days = []
+    for item in record.get("recentDays") or []:
+        if isinstance(item, dict) and isinstance(item.get("date"), str):
+            # The record calls it messageCount, but it is the day's tokens.
+            days.append({"date": item["date"], "tokens": whole(item.get("messageCount"))})
     return {
         "id": str(record.get("id") or ""),
         "name": str(record.get("name") or record.get("id") or ""),
         "tier": str(record.get("tierLabel") or ""),
-        "todayTokens": today,
+        "todayTokens": whole(record.get("todayTotalTokens")),
+        "todayPrompts": whole(record.get("todayPrompts")),
+        "todaySessions": whole(record.get("todaySessions")),
+        "days": days,
+        # Why the numbers are missing or partial, and what to do about it.
+        "status": str(record.get("usageStatusText") or ""),
+        "help": "" if record.get("ready", True) else str(record.get("authHelpText") or ""),
         "limits": limits,
         "models": models,
     }
@@ -499,8 +512,34 @@ def grok_machine_usage(root):
         if not models and session.get("primaryModelId"):
             models.append({"id": str(session["primaryModelId"]), **model_bucket(session)})
         if models:
-            found.append({"models": models})
+            found.append({"models": models, "day": session_day(session_dir)})
     return found
+
+
+def session_day(session_dir):
+    """The local date a Grok session was last active, for the per-day chart."""
+    summary = read_json(session_dir / "summary.json")
+    stamp = summary.get("last_active_at") if isinstance(summary, dict) else None
+    try:
+        when = datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).astimezone()
+    except ValueError:
+        mtime = mtime_of(session_dir / "usage.json")
+        if mtime is None:
+            return ""
+        when = datetime.fromtimestamp(mtime)
+    return when.strftime("%Y-%m-%d")
+
+
+def refresh_omarchy_records():
+    """Have Omarchy's own collectors rewrite the Claude, Codex and Fireworks
+    records. The Agents bar widget used to run this; with Sessions in its
+    place, the records would otherwise go stale."""
+    if shutil.which("omarchy-agent-usage-update") is None:
+        return
+    try:
+        subprocess.run(["omarchy-agent-usage-update"], check=False, capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def omarchy_subscriptions(usage_dir):
@@ -528,6 +567,7 @@ def collect_usage(home=None):
     if home is None:
         home = home_dir()
         usage_root = state_dir(home)
+        refresh_omarchy_records()
     else:
         # An explicit home is a test fixture: ignore the real XDG_STATE_HOME.
         home = Path(home)

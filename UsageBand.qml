@@ -9,6 +9,9 @@ Column {
 
   property var providers: []
   property bool expanded: false
+  // The last seven days take room the Sessions list needs; the bar panel
+  // has it to spare.
+  property bool showDays: false
   property int lineHeight: Style.space(22)
   property string fontFamily: Style.font.menuFamily
   property color foreground: Color.menu.text
@@ -47,6 +50,9 @@ Column {
       color: parent.alarming ? Color.urgent : parent.warning ? band.warningColor : parent.fill
     }
   }
+
+  TextMetrics { id: dayMetrics; font.family: band.fontFamily; font.pixelSize: Style.font.caption; text: "Wed" }
+  TextMetrics { id: tokenMetrics; font.family: band.fontFamily; font.pixelSize: Style.font.caption; text: "888.8M" }
 
   component Caption: Text {
     textFormat: Text.PlainText
@@ -187,6 +193,21 @@ Column {
         }
       }
 
+      // Why numbers are missing, and how to get them back.
+      Caption {
+        visible: text !== ""
+        width: parent.width
+        text: {
+          if (!providerBlock.provider) return ""
+          var bits = []
+          if (providerBlock.provider.status) bits.push(providerBlock.provider.status)
+          if (providerBlock.provider.help) bits.push(providerBlock.provider.help)
+          return bits.join(" · ")
+        }
+        color: band.warningColor
+        wrapMode: Text.WordWrap
+      }
+
       Column {
         width: parent.width
         spacing: Style.space(3)
@@ -229,6 +250,71 @@ Column {
               share: limitRow.window ? limitRow.window.percent : 0
               alarming: limitRow.window ? limitRow.window.alarming : false
               warning: limitRow.window ? limitRow.window.warning : false
+            }
+          }
+        }
+      }
+
+      Column {
+        width: parent.width
+        spacing: Style.space(2)
+        visible: band.showDays && providerBlock.provider && providerBlock.provider.days && providerBlock.provider.days.length > 0
+
+        Item {
+          width: parent.width
+          height: daysTitle.implicitHeight
+
+          Caption {
+            id: daysTitle
+            text: "Last 7 days"
+            opacity: 0.4
+          }
+
+          Caption {
+            anchors.right: parent.right
+            text: providerBlock.provider && providerBlock.provider.activity ? "today " + providerBlock.provider.activity : ""
+            opacity: 0.5
+          }
+        }
+
+        Repeater {
+          model: providerBlock.provider && providerBlock.provider.days ? providerBlock.provider.days.length : 0
+
+          delegate: Item {
+            id: dayRow
+            required property int index
+            readonly property var day: providerBlock.provider.days[index]
+            width: providerBlock.width
+            height: band.lineHeight
+
+            Caption {
+              id: dayName
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: dayMetrics.width + Style.space(10)
+              text: dayRow.day ? dayRow.day.day : ""
+              font.bold: dayRow.day && dayRow.day.today
+              opacity: dayRow.day && dayRow.day.today ? 1 : 0.6
+            }
+
+            Caption {
+              id: dayTokens
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              width: tokenMetrics.width
+              horizontalAlignment: Text.AlignRight
+              text: dayRow.day ? dayRow.day.label : ""
+              font.bold: dayRow.day && dayRow.day.today
+            }
+
+            Meter {
+              anchors.left: dayName.right
+              anchors.right: dayTokens.left
+              anchors.rightMargin: Style.space(10)
+              anchors.verticalCenter: parent.verticalCenter
+              share: dayRow.day ? dayRow.day.share : 0
+              fill: Util.alpha(band.accent, dayRow.day && dayRow.day.today ? 1 : 0.6)
+              trackAlpha: 0.12
             }
           }
         }
