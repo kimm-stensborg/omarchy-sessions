@@ -91,12 +91,12 @@ check("resume commands", {
   cursor: ["agent", "--resume", "u1"]
 })
 
-check("a window matches only when the session id is on its command line", M.matchClient(sessions[0], [
-  { address: "0x1", cmdline: "grok", cwd: "/home/kimm/Projects/casino" },
-  { address: "0x2", cmdline: "grok --resume g1", cwd: "/tmp" }
+check("a window matches only when the session id is among what runs in it", M.matchClient(sessions[0], [
+  { address: "0x1", text: "foot --working-directory=/home/kimm/Projects/casino\ngrok" },
+  { address: "0x2", text: "foot\nbash\ngrok\ng1" }
 ]).address, "0x2")
-check("no id on any command line is no match", M.matchClient(sessions[0], [
-  { address: "0x1", cmdline: "grok", cwd: "/home/kimm/Projects/casino" }
+check("no id in any window is no match", M.matchClient(sessions[0], [
+  { address: "0x1", text: "foot\ngrok" }
 ]), null)
 
 check("chips follow the tools that actually have sessions", M.toolsPresent(sessions).map(t => t.id), ["claude", "grok", "codex", "cursor"])
@@ -159,6 +159,9 @@ const cursor = M.usageFrom([], [], NOW, null, {
 check("cursor leads with the included share of the monthly plan", [cursor.tier, cursor.headline], ["Pro", "included 7%"])
 check("auto, api and on-demand follow the included row", cursor.limits.map(l => l.label + " " + l.text),
   ["Included 7%", "Auto 7%", "API 16%", "On-Demand Disabled"])
+check("a plan past its allowance reads past 100%, not near zero", M.usageFrom([], [], NOW, null, {
+  percent: 1.2, resetsAt: "", plan: "Pro", products: [], onDemand: "on"
+})[0].headline, "included 120%")
 check("a limit near full is marked", M.usageFrom([{
   id: "claude", name: "Claude", todayTokens: 0,
   limits: [{ label: "Weekly", percent: 0.94, resetsAt: "" }], models: []

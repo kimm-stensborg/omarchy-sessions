@@ -44,7 +44,6 @@ Item {
   property bool scanning: false
   property string statusMessage: ""
   property int serial: 0
-  property int appliedSerial: -1
 
   readonly property var current: {
     for (var i = 0; i < root.viewRows.length; i++) {
@@ -75,8 +74,7 @@ Item {
   readonly property int cardHeight: Math.min(Style.space(640), panel.height - Style.gapsOut * 2)
 
   function open(payloadJson) {
-    var payload = ({})
-    try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
+    var payload = root.parseJson(payloadJson || "{}") || ({})
     root.opened = true
     root.queryText = payload.query ? String(payload.query) : ""
     root.tool = payload.tool ? String(payload.tool) : ""
@@ -99,6 +97,19 @@ Item {
   }
 
   function ping() { return "ok" }
+
+  function scanCommand(args) {
+    return ["python3", root.pluginDir + "/scan.py"].concat(args)
+  }
+
+  function parseJson(text) {
+    try { return JSON.parse(text) } catch (e) { return null }
+  }
+
+  function flash(message) {
+    root.statusMessage = message
+    statusTimer.restart()
+  }
 
   function refresh() {
     var present = Model.toolsPresent(root.sessions)
@@ -126,13 +137,12 @@ Item {
 
   function runUsage() {
     usageProc.running = false
-    usageProc.command = ["python3", root.pluginDir + "/scan.py", "usage"]
+    usageProc.command = root.scanCommand(["usage"])
     usageProc.running = true
   }
 
   function applyUsage(text) {
-    var payload = null
-    try { payload = JSON.parse(text) } catch (e) { payload = null }
+    var payload = root.parseJson(text)
     if (!payload) return
     root.usage = Model.usageFrom(
       payload.subscriptions || [], payload.grok || [], Date.now(),
@@ -143,17 +153,15 @@ Item {
     root.serial = root.serial + 1
     root.scanning = true
     scanProc.running = false
-    scanProc.command = ["python3", root.pluginDir + "/scan.py", "list"]
+    scanProc.command = root.scanCommand(["list"])
     scanProc.serial = root.serial
     scanProc.running = true
   }
 
   function applyScan(text, serial) {
     if (serial !== root.serial) return
-    var payload = null
-    try { payload = JSON.parse(text) } catch (e) { payload = null }
+    var payload = root.parseJson(text)
     root.scanning = false
-    root.appliedSerial = serial
     if (!payload || !payload.sessions) {
       root.statusMessage = "Could not read sessions"
       return
@@ -165,10 +173,7 @@ Item {
   }
 
   function move(delta) {
-    if (root.count === 0) return
-    pointerGate.reset()
-    root.selected = (root.selected + delta + root.count) % root.count
-    resultList.positionViewAtIndex(root.visualOf(root.selected), ListView.Contain)
+    if (root.count > 0) root.selectAbsolute((root.selected + delta + root.count) % root.count)
   }
 
   function selectAbsolute(index) {
@@ -197,12 +202,12 @@ Item {
   function resume(row) {
     if (!row) return
     if (!Model.resumeArgv(row)) {
-      root.statusMessage = "Can't resume this one"
+      root.flash("Can't resume this one")
       return
     }
     clientProc.pending = row
     clientProc.running = false
-    clientProc.command = ["python3", root.pluginDir + "/scan.py", "clients"]
+    clientProc.command = root.scanCommand(["clients"])
     clientProc.running = true
   }
 
@@ -211,14 +216,16 @@ Item {
     if (!row) return
     var hit = Model.matchClient(row, clients)
     if (hit) {
-      actProc.command = ["python3", root.pluginDir + "/scan.py", "focus", hit.address]
+      // Closed first: while the overlay holds the keyboard, Hyprland hands
+      // focus back to the previous window as it goes, undoing the focus.
+      root.close()
+      actProc.command = root.scanCommand(["focus", hit.address])
     } else {
       var argv = Model.resumeArgv(row)
       if (!argv) return
-      var command = ["python3", root.pluginDir + "/scan.py", "launch", row.cwd || ""]
-      for (var i = 0; i < argv.length; i++) command.push(argv[i])
-      actProc.command = command
+      actProc.command = root.scanCommand(["launch", row.cwd || ""].concat(argv))
     }
+    actProc.running = false
     actProc.running = true
   }
 
@@ -259,14 +266,9 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var clients = null
-        try { clients = JSON.parse(text) } catch (e) { clients = null }
-        if (!clients) {
-          root.statusMessage = "Could not look at open windows"
-          statusTimer.restart()
-          return
-        }
-        root.resumeWithClients(clients)
+        var clients = root.parseJson(text)
+        if (clients) root.resumeWithClients(clients)
+        else root.flash("Could not look at open windows")
       }
     }
   }
@@ -276,14 +278,11 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var payload = null
-        try { payload = JSON.parse(text) } catch (e) { payload = null }
-        if (payload && payload.ok === true) {
-          root.close()
-        } else {
-          root.statusMessage = payload && payload.error ? payload.error : "Could not open it"
-          statusTimer.restart()
-        }
+        var payload = root.parseJson(text)
+        var error = payload && payload.error ? payload.error : "Could not open it"
+        if (payload && payload.ok === true) root.close()
+        else if (root.opened) root.flash(error)
+        else console.warn(root.pluginId + ":", error)
       }
     }
   }
@@ -455,227 +454,17 @@ Item {
           }
         }
 
-        Column {
+        UsageBand {
           id: usageBand
           width: parent.width
-          spacing: Style.space(8)
-          visible: root.usageShown.length > 0
-
-          Repeater {
-            model: root.usageShown.length
-
-            delegate: Column {
-              id: providerBlock
-              required property int index
-              readonly property var provider: root.usageShown[index]
-              width: usageBand.width
-              spacing: Style.space(4)
-
-              Item {
-                width: parent.width
-                height: root.usageLine
-
-                Text {
-                  textFormat: Text.PlainText
-                  anchors.left: parent.left
-                  anchors.right: providerAside.left
-                  anchors.rightMargin: Style.space(8)
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: {
-                    if (!providerBlock.provider) return ""
-                    var bits = [providerBlock.provider.name]
-                    if (providerBlock.provider.tier) bits.push(providerBlock.provider.tier)
-                    return bits.join("  ·  ")
-                  }
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                }
-
-                Text {
-                  id: providerAside
-                  textFormat: Text.PlainText
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: {
-                    if (!providerBlock.provider) return ""
-                    if (root.usageOpen) return providerBlock.provider.todayLabel || ""
-                    return providerBlock.provider.headline || providerBlock.provider.todayLabel || ""
-                  }
-                  color: root.foreground
-                  opacity: 0.7
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-
-                MouseArea {
-                  anchors.fill: parent
-                  enabled: !root.usageOpen && providerBlock.provider
-                  cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                  onClicked: root.setTool(providerBlock.provider.id)
-                }
-              }
-
-              Rectangle {
-                visible: !root.usageOpen && providerBlock.provider && providerBlock.provider.meter > 0
-                width: parent.width
-                height: Math.max(2, Style.space(3))
-                radius: height / 2
-                color: Util.alpha(root.borderColor, 0.28)
-
-                Rectangle {
-                  width: parent.width * (providerBlock.provider ? providerBlock.provider.meter : 0)
-                  height: parent.height
-                  radius: parent.radius
-                  color: providerBlock.provider && providerBlock.provider.alarming ? Color.urgent : root.accent
-                }
-              }
-
-              Column {
-                width: parent.width
-                spacing: Style.space(3)
-                visible: root.usageOpen && providerBlock.provider && providerBlock.provider.limits.length > 0
-
-                Repeater {
-                  model: providerBlock.provider ? providerBlock.provider.limits.length : 0
-
-                  delegate: Item {
-                    id: limitRow
-                    required property int index
-                    readonly property var window: providerBlock.provider.limits[index]
-                    width: providerBlock.width
-                    height: root.usageLine
-
-                    Text {
-                      textFormat: Text.PlainText
-                      anchors.left: parent.left
-                      anchors.right: limitPercent.left
-                      anchors.rightMargin: Style.space(8)
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: limitRow.window
-                        ? limitRow.window.label + (limitRow.window.reset ? "  ·  " + limitRow.window.reset : "")
-                        : ""
-                      color: root.foreground
-                      opacity: 0.75
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                      elide: Text.ElideRight
-                    }
-
-                    Text {
-                      id: limitPercent
-                      textFormat: Text.PlainText
-                      anchors.right: parent.right
-                      anchors.verticalCenter: parent.verticalCenter
-                      text: limitRow.window ? limitRow.window.text : ""
-                      color: limitRow.window && limitRow.window.alarming ? Color.urgent : root.foreground
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                    }
-
-                    Rectangle {
-                      anchors.left: parent.left
-                      anchors.right: parent.right
-                      anchors.bottom: parent.bottom
-                      height: Math.max(2, Style.space(2))
-                      radius: height / 2
-                      color: Util.alpha(root.borderColor, 0.28)
-
-                      Rectangle {
-                        width: parent.width * (limitRow.window ? limitRow.window.percent : 0)
-                        height: parent.height
-                        radius: parent.radius
-                        color: limitRow.window && limitRow.window.alarming ? Color.urgent : root.accent
-                      }
-                    }
-                  }
-                }
-              }
-
-              Column {
-                width: parent.width
-                spacing: Style.space(2)
-                visible: root.usageOpen && providerBlock.provider && providerBlock.provider.models.length > 0
-
-                Text {
-                  textFormat: Text.PlainText
-                  text: "Models"
-                  color: root.foreground
-                  opacity: 0.4
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-
-                Repeater {
-                  model: providerBlock.provider ? providerBlock.provider.models.length : 0
-
-                  delegate: Item {
-                    id: modelRow
-                    required property int index
-                    readonly property var stats: providerBlock.provider.models[index]
-                    width: providerBlock.width
-                    height: Math.max(root.usageLine, Style.font.caption * 2 + Style.space(8))
-
-                    Text {
-                      id: modelTotal
-                      textFormat: Text.PlainText
-                      anchors.right: parent.right
-                      anchors.top: parent.top
-                      text: modelRow.stats ? modelRow.stats.totalLabel : ""
-                      color: root.foreground
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                    }
-
-                    Text {
-                      textFormat: Text.PlainText
-                      anchors.left: parent.left
-                      anchors.right: modelTotal.left
-                      anchors.rightMargin: Style.space(8)
-                      anchors.top: parent.top
-                      text: modelRow.stats ? modelRow.stats.name + (modelRow.stats.cost ? "  ·  " + modelRow.stats.cost : "") : ""
-                      color: root.foreground
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                      elide: Text.ElideRight
-                    }
-
-                    Text {
-                      textFormat: Text.PlainText
-                      anchors.left: parent.left
-                      anchors.right: parent.right
-                      anchors.bottom: bar.top
-                      anchors.bottomMargin: Style.space(2)
-                      text: modelRow.stats ? modelRow.stats.detail : ""
-                      color: root.foreground
-                      opacity: 0.45
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                      elide: Text.ElideRight
-                    }
-
-                    Rectangle {
-                      id: bar
-                      anchors.left: parent.left
-                      anchors.right: parent.right
-                      anchors.bottom: parent.bottom
-                      height: Math.max(2, Style.space(2))
-                      radius: height / 2
-                      color: Util.alpha(root.borderColor, 0.18)
-
-                      Rectangle {
-                        width: parent.width * (modelRow.stats ? modelRow.stats.share : 0)
-                        height: parent.height
-                        radius: parent.radius
-                        color: Util.alpha(root.accent, 0.85)
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
+          providers: root.usageShown
+          expanded: root.usageOpen
+          lineHeight: root.usageLine
+          fontFamily: root.fontFamily
+          foreground: root.foreground
+          borderColor: root.borderColor
+          accent: root.accent
+          onPicked: function(id) { root.setTool(id) }
         }
 
         Item {

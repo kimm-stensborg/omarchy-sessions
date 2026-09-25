@@ -16,8 +16,8 @@ ID="io.github.kimm-stensborg.sessions"
 BINDINGS="$HOME/.config/hypr/bindings.lua"
 MARKER="-- Sessions overlay ($ID)"
 
-# Sessions. The rest are free on a stock install too, for when the first one
-# is not.
+# S for Sessions. The rest are free on a stock install too, for when the
+# first one is not.
 CANDIDATES=(
   "SUPER + ALT + S"
   "SUPER + SHIFT + J"

@@ -3,7 +3,9 @@
 
 The panel only needs a title, a directory and an id. Transcripts stay where
 the tool left them. `list` prints those records as JSON. `clients` describes
-open windows well enough to recognize a session that is already running.
+open windows well enough to recognize a session that is already running in
+one: every process inside the window, the files they have open, and the
+session ids the tools record per process.
 `launch` and `focus` do the two ways of going back to one.
 """
 
@@ -17,6 +19,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -81,6 +84,35 @@ def load_line(line):
     return value if isinstance(value, dict) else None
 
 
+def read_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+
+def subdirs(path):
+    """Real directories directly under `path`. Symlinks are not followed."""
+    try:
+        children = list(Path(path).iterdir())
+    except OSError:
+        return []
+    return [child for child in children if child.is_dir() and not child.is_symlink()]
+
+
+def newest(found, limit):
+    """The `limit` most recently modified paths, from (mtime, ...) tuples."""
+    found.sort(key=lambda item: item[0], reverse=True)
+    return found[:limit]
+
+
+def mtime_of(path):
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
 def claude_raw(path):
     """cwd, the first real thing the user typed, and any title the file names."""
     path = Path(path)
@@ -93,10 +125,11 @@ def claude_raw(path):
         "summary": "summary",
     }
     try:
-        size = path.stat().st_size
-        mtime_ms = int(path.stat().st_mtime * 1000)
+        stat = path.stat()
     except OSError:
         return None
+    size = stat.st_size
+    mtime_ms = int(stat.st_mtime * 1000)
 
     def take(record):
         nonlocal cwd, first_user
@@ -147,16 +180,7 @@ def claude_raw(path):
 
 def newest_files(root, limit, match):
     found = []
-    root = Path(root)
-    if not root.is_dir():
-        return []
-    try:
-        projects = list(root.iterdir())
-    except OSError:
-        return []
-    for project in projects:
-        if not project.is_dir() or project.is_symlink():
-            continue
+    for project in subdirs(root):
         try:
             children = list(project.iterdir())
         except OSError:
@@ -164,12 +188,10 @@ def newest_files(root, limit, match):
         for child in children:
             if child.is_symlink() or not child.is_file() or not match(child):
                 continue
-            try:
-                found.append((child.stat().st_mtime, child))
-            except OSError:
-                continue
-    found.sort(key=lambda item: item[0], reverse=True)
-    return [path for _, path in found[:limit]]
+            mtime = mtime_of(child)
+            if mtime is not None:
+                found.append((mtime, child))
+    return [path for _, path in newest(found, limit)]
 
 
 def claude_project_cwd(project_name, list_dir):
@@ -194,13 +216,11 @@ def claude_sessions(root):
 
 def grok_raw(summary_path):
     summary_path = Path(summary_path)
-    try:
-        data = json.loads(summary_path.read_text(encoding="utf-8"))
-        mtime_ms = int(summary_path.stat().st_mtime * 1000)
-    except (OSError, json.JSONDecodeError):
+    data = read_json(summary_path)
+    mtime = mtime_of(summary_path)
+    if not isinstance(data, dict) or mtime is None:
         return None
-    if not isinstance(data, dict):
-        return None
+    mtime_ms = int(mtime * 1000)
     info = data.get("info") if isinstance(data.get("info"), dict) else {}
     cwd = info.get("cwd") if isinstance(info.get("cwd"), str) else ""
     if not cwd:
@@ -219,34 +239,22 @@ def grok_raw(summary_path):
     }
 
 
+def grok_session_dirs(root):
+    """Grok keeps one directory per session under one per cwd:
+    sessions/<cwd>/<id>/."""
+    for cwd_dir in subdirs(root):
+        yield from subdirs(cwd_dir)
+
+
 def grok_sessions(root):
-    # Sessions sit two directories down: sessions/<cwd>/<id>/summary.json.
-    sessions = []
-    root = Path(root)
-    if not root.is_dir():
-        return []
     found = []
-    try:
-        cwd_dirs = list(root.iterdir())
-    except OSError:
-        return []
-    for cwd_dir in cwd_dirs:
-        if not cwd_dir.is_dir() or cwd_dir.is_symlink():
-            continue
-        try:
-            session_dirs = list(cwd_dir.iterdir())
-        except OSError:
-            continue
-        for session_dir in session_dirs:
-            summary = session_dir / "summary.json"
-            if not session_dir.is_dir() or session_dir.is_symlink() or not summary.is_file():
-                continue
-            try:
-                found.append((summary.stat().st_mtime, summary))
-            except OSError:
-                continue
-    found.sort(key=lambda item: item[0], reverse=True)
-    for _, summary in found[:GROK_LIMIT]:
+    for session_dir in grok_session_dirs(root):
+        summary = session_dir / "summary.json"
+        mtime = mtime_of(summary) if summary.is_file() else None
+        if mtime is not None:
+            found.append((mtime, summary))
+    sessions = []
+    for _, summary in newest(found, GROK_LIMIT):
         raw = grok_raw(summary)
         if raw:
             sessions.append(raw)
@@ -281,22 +289,15 @@ def resolve_dashed_path(encoded, list_dir):
 
 
 def fs_list_dir(path):
-    try:
-        return [
-            child.name
-            for child in Path(path).iterdir()
-            if child.is_dir() and not child.is_symlink()
-        ]
-    except OSError:
-        return []
+    return [child.name for child in subdirs(path)]
 
 
 def cursor_raw(transcript, encoded, cwd):
     transcript = Path(transcript)
-    try:
-        mtime_ms = int(transcript.stat().st_mtime * 1000)
-    except OSError:
+    mtime = mtime_of(transcript)
+    if mtime is None:
         return None
+    mtime_ms = int(mtime * 1000)
     first_user = ""
     try:
         with transcript.open("r", encoding="utf-8", errors="replace") as handle:
@@ -325,35 +326,18 @@ def cursor_raw(transcript, encoded, cwd):
 
 
 def cursor_sessions(root, list_dir=fs_list_dir):
-    root = Path(root)
-    if not root.is_dir():
-        return []
+    # Transcripts sit at projects/<project>/agent-transcripts/<id>/<id>.jsonl.
     found = []
-    try:
-        projects = list(root.iterdir())
-    except OSError:
-        return []
-    for project in projects:
-        transcripts = project / "agent-transcripts"
-        if not transcripts.is_dir() or transcripts.is_symlink():
-            continue
-        try:
-            session_dirs = list(transcripts.iterdir())
-        except OSError:
-            continue
-        for session_dir in session_dirs:
-            if not session_dir.is_dir() or session_dir.is_symlink():
-                continue
+    for project in subdirs(root):
+        for session_dir in subdirs(project / "agent-transcripts"):
             transcript = session_dir / (session_dir.name + ".jsonl")
             if not transcript.is_file() or transcript.is_symlink():
                 continue
-            try:
-                found.append((transcript.stat().st_mtime, project.name, transcript))
-            except OSError:
-                continue
-    found.sort(key=lambda item: item[0], reverse=True)
+            mtime = mtime_of(transcript)
+            if mtime is not None:
+                found.append((mtime, project.name, transcript))
     sessions = []
-    for _, encoded, transcript in found[:CURSOR_LIMIT]:
+    for _, encoded, transcript in newest(found, CURSOR_LIMIT):
         cwd = resolve_dashed_path(encoded, list_dir)
         raw = cursor_raw(transcript, encoded, cwd)
         if raw:
@@ -450,11 +434,19 @@ def model_bucket(bucket):
     }
 
 
+def models_from(model_usage):
+    """`{"model-id": {tokens...}}` as a list of slim per-model buckets."""
+    if not isinstance(model_usage, dict):
+        return []
+    return [
+        {"id": str(model_id), **model_bucket(bucket)}
+        for model_id, bucket in model_usage.items()
+        if model_id and isinstance(bucket, dict)
+    ]
+
+
 def slim_subscription(record):
-    models = []
-    for model_id, bucket in (record.get("modelUsage") or {}).items():
-        if isinstance(bucket, dict) and model_id:
-            models.append({"id": str(model_id), **model_bucket(bucket)})
+    models = models_from(record.get("modelUsage"))
     limits = []
     for item in record.get("limits") or []:
         if not isinstance(item, dict):
@@ -490,71 +482,65 @@ def state_dir(home):
     return Path(home) / ".local" / "state"
 
 
+def grok_machine_usage(root):
+    """Per-session model usage from ~/.grok/sessions/*/*/usage.json."""
+    found = []
+    for session_dir in grok_session_dirs(root):
+        usage = session_dir / "usage.json"
+        if usage.is_symlink() or not usage.is_file():
+            continue
+        data = read_json(usage)
+        session = data.get("session") if isinstance(data, dict) else None
+        if not isinstance(session, dict):
+            continue
+        models = models_from(session.get("modelUsage"))
+        if not models and session.get("primaryModelId"):
+            models.append({"id": str(session["primaryModelId"]), **model_bucket(session)})
+        if models:
+            found.append({"models": models})
+    return found
+
+
+def omarchy_subscriptions(usage_dir):
+    """The records Omarchy writes for its agents panel, one file per subscription."""
+    subscriptions = []
+    if not usage_dir.is_dir():
+        return subscriptions
+    for path in sorted(usage_dir.glob("*.json")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        record = read_json(path)
+        if isinstance(record, dict) and record.get("id"):
+            subscriptions.append(slim_subscription(record))
+    return subscriptions
+
+
 def collect_usage(home=None):
     """Subscription limits Omarchy already collected, plus Grok's own session files.
 
-    Grok has no quota file on disk. Its numbers are the sum of the usage
-    records under ~/.grok/sessions, which is this machine rather than the
-    account. Cursor keeps no usage record here at all.
+    Grok has no quota file on disk. Its per-model numbers are the sum of the
+    usage records under ~/.grok/sessions, which is this machine rather than
+    the account. Grok's weekly allowance and Cursor's monthly plan are
+    fetched, side by side so one slow request does not wait on the other.
     """
     if home is None:
         home = home_dir()
         usage_root = state_dir(home)
     else:
+        # An explicit home is a test fixture: ignore the real XDG_STATE_HOME.
         home = Path(home)
         usage_root = home / ".local" / "state"
-    subscriptions = []
-    usage_dir = usage_root / "omarchy" / "agents" / "usage"
-    if usage_dir.is_dir():
-        for path in sorted(usage_dir.glob("*.json")):
-            if path.is_symlink() or not path.is_file():
-                continue
-            try:
-                record = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            if isinstance(record, dict) and record.get("id"):
-                subscriptions.append(slim_subscription(record))
-
-    grok = []
-    root = home / ".grok" / "sessions"
-    if root.is_dir():
-        try:
-            cwd_dirs = list(root.iterdir())
-        except OSError:
-            cwd_dirs = []
-        for cwd_dir in cwd_dirs:
-            if not cwd_dir.is_dir() or cwd_dir.is_symlink():
-                continue
-            try:
-                session_dirs = list(cwd_dir.iterdir())
-            except OSError:
-                continue
-            for session_dir in session_dirs:
-                usage = session_dir / "usage.json"
-                if not session_dir.is_dir() or session_dir.is_symlink() or not usage.is_file() or usage.is_symlink():
-                    continue
-                try:
-                    data = json.loads(usage.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    continue
-                session = data.get("session") if isinstance(data, dict) else None
-                if not isinstance(session, dict):
-                    continue
-                models = []
-                for model_id, bucket in (session.get("modelUsage") or {}).items():
-                    if isinstance(bucket, dict) and model_id:
-                        models.append({"id": str(model_id), **model_bucket(bucket)})
-                if not models and session.get("primaryModelId"):
-                    models.append({"id": str(session["primaryModelId"]), **model_bucket(session)})
-                if models:
-                    grok.append({"models": models})
-    return {
-        "subscriptions": subscriptions,
-        "grok": grok,
-        "allowance": grok_allowance(home),
-        "cursor": cursor_allowance(home),
-    }
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        grok_fetch = pool.submit(grok_allowance, home)
+        cursor_fetch = pool.submit(cursor_allowance, home)
+        subscriptions = omarchy_subscriptions(usage_root / "omarchy" / "agents" / "usage")
+        grok = grok_machine_usage(home / ".grok" / "sessions")
+        return {
+            "subscriptions": subscriptions,
+            "grok": grok,
+            "allowance": grok_fetch.result(),
+            "cursor": cursor_fetch.result(),
+        }
 
 
 def percent_fraction(value):
@@ -614,13 +600,7 @@ def allowance_from_log(path):
 
 
 def fetch_grok_allowance(auth_path):
-    auth_path = Path(auth_path)
-    if not auth_path.is_file():
-        return None
-    try:
-        stored = json.loads(auth_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    stored = read_json(auth_path)
     token = ""
     if isinstance(stored, dict):
         for value in stored.values():
@@ -708,13 +688,7 @@ def cursor_rpc(token, method):
 
 
 def fetch_cursor_allowance(auth_path):
-    auth_path = Path(auth_path)
-    if not auth_path.is_file():
-        return None
-    try:
-        stored = json.loads(auth_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    stored = read_json(auth_path)
     token = stored.get("accessToken") if isinstance(stored, dict) else ""
     if not isinstance(token, str) or not token:
         return None
@@ -756,7 +730,149 @@ def collect(home=None):
     return {"sessions": sessions, "warnings": warnings}
 
 
-def window_clients():
+CURSOR_CONVERSATION_RE = re.compile(r'"conversationId"\s*:\s*"([^"]+)"')
+CURSOR_LOG_TAIL = 262144
+
+
+def process_cmdline(pid):
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return ""
+    return raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+
+
+def process_parents():
+    """Every visible process's parent, as {pid: ppid}."""
+    parents = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return parents
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            stat = Path(f"/proc/{entry}/stat").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        # The command name sits in parentheses and may itself hold spaces.
+        fields = stat[stat.rfind(")") + 2:].split()
+        if len(fields) > 1 and fields[1].isdigit():
+            parents[int(entry)] = int(fields[1])
+    return parents
+
+
+def process_tree(pid, parents):
+    """`pid` and everything started under it."""
+    children = {}
+    for child, parent in parents.items():
+        children.setdefault(parent, []).append(child)
+    tree = []
+    pending = [pid]
+    while pending:
+        current = pending.pop()
+        if current in tree:
+            continue
+        tree.append(current)
+        pending.extend(children.get(current, []))
+    return tree
+
+
+def open_files(pid):
+    """Paths of the regular files a process has open."""
+    paths = []
+    try:
+        fds = os.listdir(f"/proc/{pid}/fd")
+    except OSError:
+        return paths
+    for fd in fds:
+        try:
+            target = os.readlink(f"/proc/{pid}/fd/{fd}")
+        except OSError:
+            continue
+        if target.startswith("/"):
+            paths.append(target)
+    return paths
+
+
+def claude_running(home):
+    """{pid: session id} from the file Claude keeps per live process."""
+    running = {}
+    for path in Path(home, ".claude", "sessions").glob("*.json"):
+        record = read_json(path)
+        if isinstance(record, dict) and isinstance(record.get("pid"), int) and record.get("sessionId"):
+            running[record["pid"]] = str(record["sessionId"])
+    return running
+
+
+def grok_running(home):
+    """{pid: session id} from Grok's list of open sessions."""
+    running = {}
+    records = read_json(Path(home, ".grok", "active_sessions.json"))
+    for record in records if isinstance(records, list) else []:
+        if isinstance(record, dict) and isinstance(record.get("pid"), int) and record.get("session_id"):
+            running[record["pid"]] = str(record["session_id"])
+    return running
+
+
+def cursor_log_conversation(path):
+    """The conversation an `agent` log was last writing about."""
+    path = Path(path)
+    if "cursor-agent-logs" not in str(path.parent) or path.suffix != ".log":
+        return ""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            handle.seek(max(0, size - CURSOR_LOG_TAIL))
+            text = handle.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    found = CURSOR_CONVERSATION_RE.findall(text)
+    return found[-1] if found else ""
+
+
+def process_marks(pid, running):
+    """Everything about one process that can carry a session id: its command
+    line, the files it has open, and what the tools record for that pid."""
+    marks = [process_cmdline(pid)]
+    if pid in running:
+        marks.append(running[pid])
+    for path in open_files(pid):
+        marks.append(path)
+        conversation = cursor_log_conversation(path)
+        if conversation:
+            marks.append(conversation)
+    return [mark for mark in marks if mark]
+
+
+def describe_windows(clients, parents, marks_of):
+    """Each window with the marks of every process running inside it.
+
+    A terminal running as a server owns several windows under one pid. Its
+    children cannot be told apart by window, so such a pid only contributes
+    its own command line.
+    """
+    pids = [client.get("pid") for client in clients if isinstance(client, dict)]
+    described = []
+    for client in clients:
+        if not isinstance(client, dict):
+            continue
+        address = client.get("address")
+        pid = client.get("pid")
+        if not isinstance(address, str) or not address:
+            continue
+        marks = []
+        if isinstance(pid, int) and pid > 0:
+            tree = process_tree(pid, parents) if pids.count(pid) == 1 else [pid]
+            for member in tree:
+                marks.extend(marks_of(member))
+        described.append({"address": address, "text": "\n".join(marks)})
+    return described
+
+
+def window_clients(home=None):
+    home = Path(home) if home else home_dir()
     try:
         completed = subprocess.run(
             ["hyprctl", "clients", "-j"],
@@ -770,33 +886,8 @@ def window_clients():
         return []
     if not isinstance(clients, list):
         return []
-    described = []
-    for client in clients:
-        if not isinstance(client, dict):
-            continue
-        pid = client.get("pid")
-        cmdline = ""
-        cwd = ""
-        if isinstance(pid, int) and pid > 0:
-            try:
-                raw = Path(f"/proc/{pid}/cmdline").read_bytes()
-                cmdline = raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
-            except OSError:
-                cmdline = ""
-            try:
-                cwd = os.readlink(f"/proc/{pid}/cwd")
-            except OSError:
-                cwd = ""
-        address = client.get("address")
-        if not isinstance(address, str) or not address:
-            continue
-        described.append({
-            "address": address,
-            "cmdline": cmdline,
-            "cwd": cwd,
-            "title": client.get("title") if isinstance(client.get("title"), str) else "",
-        })
-    return described
+    running = {**claude_running(home), **grok_running(home)}
+    return describe_windows(clients, process_parents(), lambda pid: process_marks(pid, running))
 
 
 def launch(cwd, argv):
@@ -816,49 +907,53 @@ def launch(cwd, argv):
     return {"ok": True}
 
 
+def focus_commands(address):
+    """Hyprland with a Lua config takes `hl.dsp.focus`; older ones only
+    know `focuswindow`. Both are tried, in that order, as Omarchy does."""
+    target = "address:" + address
+    return [
+        ["hyprctl", "dispatch", 'hl.dsp.focus({ window = "%s" })' % target],
+        ["hyprctl", "dispatch", "focuswindow", target],
+    ]
+
+
 def focus(address):
-    if not address or not str(address).startswith("0x"):
+    if not address or not re.fullmatch(r"0x[0-9a-fA-F]+", str(address)):
         return {"ok": False, "error": "not a window"}
-    try:
-        subprocess.Popen(
-            ["hyprctl", "dispatch", "focuswindow", "address:" + address],
-            start_new_session=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except OSError as exc:
-        return {"ok": False, "error": str(exc)}
-    return {"ok": True}
+    error = "could not focus that window"
+    for command in focus_commands(address):
+        try:
+            completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=3)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            error = str(exc)
+            continue
+        if completed.returncode == 0 and completed.stdout.strip() == "ok":
+            return {"ok": True}
+    return {"ok": False, "error": error}
 
 
 def main(argv):
     command = argv[1] if len(argv) > 1 else "list"
-    if command == "list":
-        json.dump(collect(), sys.stdout)
-        sys.stdout.write("\n")
-        return 0
-    if command == "usage":
-        json.dump(collect_usage(), sys.stdout)
-        sys.stdout.write("\n")
-        return 0
-    if command == "clients":
-        json.dump(window_clients(), sys.stdout)
-        sys.stdout.write("\n")
-        return 0
-    if command == "launch":
-        # launch <cwd> <binary> [args...]  — an empty cwd is passed as "".
-        if len(argv) < 4:
-            json.dump({"ok": False, "error": "usage: launch <cwd> <binary> [args...]"}, sys.stdout)
-            return 1
-        json.dump(launch(argv[2], argv[3:]), sys.stdout)
-        sys.stdout.write("\n")
-        return 0
-    if command == "focus":
-        json.dump(focus(argv[2] if len(argv) > 2 else ""), sys.stdout)
-        sys.stdout.write("\n")
-        return 0
-    json.dump({"ok": False, "error": "unknown command"}, sys.stdout)
-    return 1
+    args = argv[2:]
+    if command == "launch" and len(args) < 2:
+        # launch <cwd> <binary> [args...]  -- an empty cwd is passed as "".
+        return reply({"ok": False, "error": "usage: launch <cwd> <binary> [args...]"}, 1)
+    commands = {
+        "list": collect,
+        "usage": collect_usage,
+        "clients": window_clients,
+        "launch": lambda: launch(args[0], args[1:]),
+        "focus": lambda: focus(args[0] if args else ""),
+    }
+    if command not in commands:
+        return reply({"ok": False, "error": "unknown command"}, 1)
+    return reply(commands[command]())
+
+
+def reply(value, status=0):
+    json.dump(value, sys.stdout)
+    sys.stdout.write("\n")
+    return status
 
 
 if __name__ == "__main__":

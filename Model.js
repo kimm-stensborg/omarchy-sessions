@@ -101,26 +101,21 @@ function normalize(rawList, home) {
 // Two folders with the same name would otherwise share a header. The
 // parent is added only for those, so a unique project stays one word.
 function labelMap(sessions, home) {
-  var cwdsByLabel = {}
-  var seen = {}
+  var keysByLabel = {}
   for (var i = 0; i < sessions.length; i++) {
     var key = sessions[i].key
-    if (seen[key]) continue
-    seen[key] = true
-    var label = projectLabel(sessions[i].cwd || sessions[i].key, home)
-    if (!cwdsByLabel[label]) cwdsByLabel[label] = []
-    cwdsByLabel[label].push(sessions[i].cwd || sessions[i].key)
+    var label = projectLabel(key, home)
+    if (!keysByLabel[label]) keysByLabel[label] = []
+    if (keysByLabel[label].indexOf(key) === -1) keysByLabel[label].push(key)
   }
   var map = {}
-  for (var base in cwdsByLabel) {
-    var paths = cwdsByLabel[base]
-    for (var p = 0; p < paths.length; p++) {
-      if (paths.length === 1) {
-        map[paths[p]] = base
-        continue
-      }
-      var parts = cleanPath(paths[p]).split("/").filter(function(part) { return part })
-      map[paths[p]] = parts.length >= 2 ? parts[parts.length - 2] + "/" + parts[parts.length - 1] : base
+  for (var base in keysByLabel) {
+    var keys = keysByLabel[base]
+    for (var k = 0; k < keys.length; k++) {
+      var parts = cleanPath(keys[k]).split("/").filter(function(part) { return part })
+      map[keys[k]] = keys.length > 1 && parts.length >= 2
+        ? parts[parts.length - 2] + "/" + parts[parts.length - 1]
+        : base
     }
   }
   return map
@@ -213,15 +208,17 @@ function resumeArgv(session) {
   return null
 }
 
-// A window already running this session. The id has to be on its command
-// line: sharing a directory is not enough, since several terminals do.
+// A window already running this session. scan.py gathers, per window, the
+// command lines, open files and recorded session ids of every process in
+// it; the id has to be among them. Sharing a directory is not enough,
+// since several terminals do.
 function matchClient(session, clients) {
   var id = session && session.id ? String(session.id) : ""
   if (!id) return null
   var list = clients || []
   for (var i = 0; i < list.length; i++) {
-    var cmd = str(list[i] && list[i].cmdline)
-    if (cmd && cmd.indexOf(id) !== -1 && list[i].address) return list[i]
+    var text = str(list[i] && list[i].text)
+    if (text && text.indexOf(id) !== -1 && list[i].address) return list[i]
   }
   return null
 }
@@ -374,21 +371,35 @@ function modelRows(models) {
   return rows
 }
 
+// scan.py hands every percent over as a fraction, so 1.2 is a plan
+// 20% past its allowance, not 1.2%.
+function fraction(value) {
+  if (value === null || value === undefined || value === "") return null
+  var n = Number(value)
+  if (!isFinite(n) || n < 0) return null
+  return n
+}
+
+function limitRow(label, short, percent, reset) {
+  return {
+    label: label,
+    short: short,
+    percent: clamp01(percent),
+    text: formatPercent(percent),
+    reset: reset || "",
+    alarming: percent >= 0.9
+  }
+}
+
 function subscriptionPanel(raw, now) {
   if (!raw || !raw.id) return null
   var limits = []
   var source = raw.limits || []
   for (var i = 0; i < source.length && limits.length < 3; i++) {
-    var percent = Number(source[i].percent)
-    if (!isFinite(percent) || percent < 0) continue
-    limits.push({
-      label: str(source[i].label),
-      short: shortLimit(source[i].label),
-      percent: clamp01(percent),
-      text: formatPercent(percent),
-      reset: resetLabel(source[i].resetsAt, now),
-      alarming: percent >= 0.9
-    })
+    var percent = fraction(source[i].percent)
+    if (percent === null) continue
+    limits.push(limitRow(str(source[i].label), shortLimit(source[i].label), percent,
+      resetLabel(source[i].resetsAt, now)))
   }
   var models = modelRows(raw.models || [])
   var today = Number(raw.todayTokens) || 0
@@ -410,13 +421,6 @@ function subscriptionPanel(raw, now) {
     limits: limits,
     models: models
   }
-}
-
-function fraction(value) {
-  var n = Number(value)
-  if (!isFinite(n) || n < 0) return null
-  if (n > 1) n = n / 100
-  return n
 }
 
 function cursorPanel(allowance, now) {
@@ -461,17 +465,6 @@ function grokProductLabel(name) {
   return text
 }
 
-function limitRow(label, short, percent, reset) {
-  return {
-    label: label,
-    short: short,
-    percent: clamp01(percent),
-    text: formatPercent(percent),
-    reset: reset || "",
-    alarming: percent >= 0.9
-  }
-}
-
 function grokPanel(sessions, allowance, now) {
   var lists = []
   var source = sessions || []
@@ -492,10 +485,12 @@ function grokPanel(sessions, allowance, now) {
   }
   if (!models.length && !limits.length) return null
   var ticks = 0
-  for (var m = 0; m < merged.length; m++) ticks += Number(merged[m].costTicks) || 0
-  var cost = formatUsdFromTicks(ticks)
   var tokens = 0
-  for (var t = 0; t < merged.length; t++) tokens += bucketTotal(merged[t])
+  for (var m = 0; m < merged.length; m++) {
+    ticks += Number(merged[m].costTicks) || 0
+    tokens += bucketTotal(merged[m])
+  }
+  var cost = formatUsdFromTicks(ticks)
   var parts = []
   if (cost) parts.push(cost)
   if (tokens > 0) parts.push(formatTokens(tokens))
