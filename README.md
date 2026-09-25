@@ -28,7 +28,7 @@ The recent sessions on this machine, not the whole history: up to forty Claude t
 
 A generated title is shown when the tool wrote one. Otherwise the first line you typed. Claude and Cursor name the project folder by replacing slashes, and that name is turned back into a real path by matching it against directories that exist, so `omarchy-notes` stays one folder. Claude's own record of the directory wins when the transcript has one.
 
-Above the list, each subscription that has numbers gets a column, side by side. Claude, Codex and Fireworks use the usage records Omarchy already writes for its agents panel: the allowance used, when it renews, today's tokens, and the per-model split. Click it, or the tool's chip, and its allowances and that split open in full. Grok's column is the weekly allowance from the same billing figure `/usage` shows, and under it the Build and Chat shares of that week. The model lines under Grok stay the sum of the session files on this machine. Cursor's column is the monthly plan from the same screen as `agent` `/usage`: the included percent, Auto and API inside it, and whether on-demand is on. A subscription with nothing recorded yet is left off the strip. Each allowance that renews gets its own line and meter, with when it renews: a countdown inside a day, the weekday and time inside a week, the date after that. Claude shows its week and, under it, its 5-hour session that way, so every column opens on its longest allowance. Shares inside an allowance, like Grok's Build and Chat or Cursor's Auto and API, wait for the full view.
+At the foot of the panel, a strip of fixed height gives each subscription that has numbers a column, side by side, whichever tool is picked above; the list never moves as the numbers come in. Claude, Codex and Fireworks use the usage records Omarchy writes. Grok's column is the weekly allowance from the same billing figure `/usage` shows, and Cursor's the monthly plan from the same screen as `agent` `/usage`. A subscription with nothing recorded yet is left off the strip. Each allowance that renews gets its own line and meter, with when it renews: a countdown inside a day, the weekday and time inside a week, the date after that. Claude shows its week and, under it, its 5-hour session, so every column opens on its longest allowance. Clicking a column shows only that tool's sessions. Shares inside an allowance (Grok's Build and Chat, Cursor's Auto and API), the last seven days and the split by model are in the bar's popup, described below.
 
 ## In the bar
 
@@ -82,8 +82,8 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | Enter | Focus the terminal already running that session, or open one resumed there. |
 | Ctrl+Enter | Start a new conversation with that session's tool, in its folder. |
 | Tab / Shift+Tab | Step to the next or previous chip: All, then each tool, and round again. |
-| Click a chip | Show only that tool, and its allowance and models when those exist. Click it again for all of them. |
-| Click a subscription | Same as its chip. |
+| Click a chip | Show only that tool's sessions. Click it again for all of them. |
+| Click a subscription at the foot | Same as its chip. |
 | Esc | Clear the line, or close the panel when the line is empty. |
 
 ## Dependencies
@@ -112,7 +112,7 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 | `Sessions.qml` | The panel: search line, chips and the session list. |
 | `BarWidget.qml` | The bar button, its setting, the five-minute refresh, and the popup's key. |
 | `UsagePanel.qml` | The popup under the bar button. |
-| `UsageBand.qml` | The subscriptions side by side, and one opened in full: limits, the last seven days, models. |
+| `UsageBand.qml` | The fixed-height strip of subscriptions at the foot of the Sessions panel. |
 | `Model.js` | Titles, grouping, search, the resume command, and which window is already that session. |
 | `scan.py` | Reading the four tools' session files, the usage cache, and launching or focusing, herdr panes included. |
 | `test.js` | `Model.js`. |

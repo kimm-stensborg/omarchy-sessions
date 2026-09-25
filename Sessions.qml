@@ -38,15 +38,6 @@ Item {
   readonly property color matchColor: root.themeColors.yellow || root.accent
   readonly property color runningColor: root.themeColors.green || root.accent
   readonly property color warningColor: root.themeColors.yellow || root.accent
-  readonly property var usageShown: {
-    if (!root.tool) return root.usage
-    for (var i = 0; i < root.usage.length; i++) {
-      if (root.usage[i].id === root.tool) return [root.usage[i]]
-    }
-    return []
-  }
-  readonly property bool usageOpen: root.tool !== "" && root.usageShown.length > 0
-  readonly property int usageLine: Math.max(Style.space(22), Style.font.caption + Style.space(8))
   property bool scanning: false
   property string statusMessage: ""
   property int serial: 0
@@ -577,32 +568,12 @@ Item {
           }
         }
 
-        UsageBand {
-          id: usageBand
-          width: parent.width
-          providers: root.usageShown
-          expanded: root.usageOpen
-          lineHeight: root.usageLine
-          fontFamily: root.fontFamily
-          foreground: root.foreground
-          borderColor: root.borderColor
-          accent: root.accent
-          warningColor: root.warningColor
-          onPicked: function(id) { root.setTool(id) }
-        }
-
-        Rectangle {
-          visible: usageBand.visible
-          width: parent.width
-          height: Style.normalBorderWidth
-          color: Util.alpha(root.borderColor, 0.2)
-        }
-
         Item {
           width: parent.width
           height: Math.max(0, parent.height - root.headerHeight - root.metaLineHeight
             - root.footerHeight - root.contentSpacing * 3
             - (usageBand.visible ? usageBand.height + Style.normalBorderWidth + root.contentSpacing * 2 : 0))
+
 
           ListView {
             id: resultList
@@ -777,6 +748,28 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
           }
+        }
+
+        Rectangle {
+          visible: usageBand.visible
+          width: parent.width
+          height: Style.normalBorderWidth
+          color: Util.alpha(root.borderColor, 0.2)
+        }
+
+        // Every subscription at a glance, at a fixed height so the list
+        // above keeps its size. The full picture is in the bar's popup.
+        UsageBand {
+          id: usageBand
+          width: parent.width
+          height: implicitHeight
+          providers: root.usage
+          fontFamily: root.fontFamily
+          foreground: root.foreground
+          borderColor: root.borderColor
+          accent: root.accent
+          warningColor: root.warningColor
+          onPicked: function(id) { root.setTool(id) }
         }
 
         Text {

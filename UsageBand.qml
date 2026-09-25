@@ -1,18 +1,15 @@
 import QtQuick
 import qs.Commons
 
-// The strip above the list: the subscriptions side by side, each with a
-// line and a meter per allowance that renews. Expanded (one tool picked), that subscription opens
-// into its limits and its per-model split instead.
-Column {
+// The strip at the foot of the Sessions panel: every subscription side by
+// side, each with a line and a meter per allowance that renews. Its height is
+// fixed at room for `lines` allowances, so the list above never moves as the
+// numbers come and go. Clicking a subscription shows only that tool's sessions.
+Item {
   id: band
 
   property var providers: []
-  property bool expanded: false
-  // The last seven days take room the Sessions list needs; the bar panel
-  // has it to spare.
-  property bool showDays: false
-  property int lineHeight: Style.space(22)
+  property int lines: 2
   property string fontFamily: Style.font.menuFamily
   property color foreground: Color.menu.text
   property color borderColor: Color.menu.border
@@ -21,50 +18,39 @@ Column {
 
   signal picked(string id)
 
-  spacing: Style.space(8)
-  visible: band.providers.length > 0
+  readonly property int gap: Style.space(3)
+  readonly property int meterHeight: Math.max(2, Style.space(3))
+  readonly property int lineHeight: Math.ceil(captionMetrics.height)
 
-  // What a used share is drawn in: amber from three quarters, red near the end.
+  visible: band.providers.length > 0
+  implicitHeight: band.lineHeight + band.lines * (band.gap + band.lineHeight + band.gap + band.meterHeight)
+
+  FontMetrics {
+    id: captionMetrics
+    font.family: band.fontFamily
+    font.pixelSize: Style.font.caption
+  }
+
+  // Amber from three quarters, red near the end.
   function levelColor(limit, normal) {
     if (limit && limit.alarming) return Color.urgent
     if (limit && limit.warning) return band.warningColor
     return normal
   }
 
-  // A thin track with the used share filled in, amber and then red as it runs out.
-  component Meter: Rectangle {
-    property real share: 0
-    property bool alarming: false
-    property bool warning: false
-    property color fill: band.accent
-    property real trackAlpha: 0.28
-
-    height: Math.max(2, Style.space(2))
-    radius: height / 2
-    color: Util.alpha(band.borderColor, trackAlpha)
-
-    Rectangle {
-      width: parent.width * parent.share
-      height: parent.height
-      radius: parent.radius
-      color: parent.alarming ? Color.urgent : parent.warning ? band.warningColor : parent.fill
-    }
-  }
-
-  TextMetrics { id: dayMetrics; font.family: band.fontFamily; font.pixelSize: Style.font.caption; text: "Wed" }
-  TextMetrics { id: tokenMetrics; font.family: band.fontFamily; font.pixelSize: Style.font.caption; text: "888.8M" }
-
   component Caption: Text {
     textFormat: Text.PlainText
     color: band.foreground
     font.family: band.fontFamily
     font.pixelSize: Style.font.caption
+    height: band.lineHeight
+    verticalAlignment: Text.AlignVCenter
   }
 
   Row {
     id: summary
-    visible: !band.expanded
     width: band.width
+    height: band.height
     spacing: Style.space(18)
 
     Repeater {
@@ -74,13 +60,13 @@ Column {
         id: cell
         required property int index
         readonly property var provider: band.providers[index]
+        readonly property var shown: cell.provider ? cell.provider.summary.slice(0, band.lines) : []
         width: (summary.width - summary.spacing * (band.providers.length - 1)) / Math.max(1, band.providers.length)
-        height: cellText.implicitHeight
+        height: summary.height
 
         Column {
-          id: cellText
           width: parent.width
-          spacing: Style.space(3)
+          spacing: band.gap
 
           Caption {
             width: parent.width
@@ -96,7 +82,7 @@ Column {
           // Nothing that renews, as with Grok counted on this machine alone:
           // what was recorded stands in for the allowance lines.
           Caption {
-            visible: cell.provider && cell.provider.summary.length === 0
+            visible: cell.shown.length === 0
             width: parent.width
             text: cell.provider ? cell.provider.todayLabel || "" : ""
             opacity: 0.6
@@ -104,18 +90,18 @@ Column {
           }
 
           Repeater {
-            model: cell.provider ? cell.provider.summary.length : 0
+            model: cell.shown.length
 
             delegate: Column {
               id: allowance
               required property int index
-              readonly property var limit: cell.provider.summary[index]
-              width: cellText.width
-              spacing: Style.space(3)
+              readonly property var limit: cell.shown[index]
+              width: cell.width
+              spacing: band.gap
 
               Item {
                 width: parent.width
-                height: allowanceUsed.implicitHeight
+                height: band.lineHeight
 
                 Caption {
                   id: allowanceUsed
@@ -136,12 +122,18 @@ Column {
                 }
               }
 
-              Meter {
+              Rectangle {
                 width: parent.width
-                height: Math.max(2, Style.space(3))
-                share: allowance.limit ? allowance.limit.percent : 0
-                alarming: allowance.limit ? allowance.limit.alarming : false
-                warning: allowance.limit ? allowance.limit.warning : false
+                height: band.meterHeight
+                radius: height / 2
+                color: Util.alpha(band.borderColor, 0.28)
+
+                Rectangle {
+                  width: parent.width * (allowance.limit ? Math.min(1, allowance.limit.percent) : 0)
+                  height: parent.height
+                  radius: parent.radius
+                  color: band.levelColor(allowance.limit, band.accent)
+                }
               }
             }
           }
@@ -151,231 +143,6 @@ Column {
           anchors.fill: parent
           cursorShape: Qt.PointingHandCursor
           onClicked: if (cell.provider) band.picked(cell.provider.id)
-        }
-      }
-    }
-  }
-
-  Repeater {
-    model: band.expanded ? band.providers.length : 0
-
-    delegate: Column {
-      id: providerBlock
-      required property int index
-      readonly property var provider: band.providers[index]
-      width: band.width
-      spacing: Style.space(4)
-
-      Item {
-        width: parent.width
-        height: band.lineHeight
-
-        Caption {
-          anchors.left: parent.left
-          anchors.right: providerAside.left
-          anchors.rightMargin: Style.space(8)
-          anchors.verticalCenter: parent.verticalCenter
-          text: {
-            if (!providerBlock.provider) return ""
-            var bits = [providerBlock.provider.name]
-            if (providerBlock.provider.tier) bits.push(providerBlock.provider.tier)
-            return bits.join("  ·  ")
-          }
-          elide: Text.ElideRight
-        }
-
-        Caption {
-          id: providerAside
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          text: providerBlock.provider ? providerBlock.provider.todayLabel || "" : ""
-          opacity: 0.7
-        }
-      }
-
-      // Why numbers are missing, and how to get them back.
-      Caption {
-        visible: text !== ""
-        width: parent.width
-        text: {
-          if (!providerBlock.provider) return ""
-          var bits = []
-          if (providerBlock.provider.status) bits.push(providerBlock.provider.status)
-          if (providerBlock.provider.help) bits.push(providerBlock.provider.help)
-          return bits.join(" · ")
-        }
-        color: band.warningColor
-        wrapMode: Text.WordWrap
-      }
-
-      Column {
-        width: parent.width
-        spacing: Style.space(3)
-        visible: providerBlock.provider && providerBlock.provider.limits.length > 0
-
-        Repeater {
-          model: providerBlock.provider ? providerBlock.provider.limits.length : 0
-
-          delegate: Item {
-            id: limitRow
-            required property int index
-            readonly property var window: providerBlock.provider.limits[index]
-            width: providerBlock.width
-            height: band.lineHeight
-
-            Caption {
-              anchors.left: parent.left
-              anchors.right: limitPercent.left
-              anchors.rightMargin: Style.space(8)
-              anchors.verticalCenter: parent.verticalCenter
-              text: limitRow.window
-                ? limitRow.window.label + (limitRow.window.reset ? "  ·  " + limitRow.window.reset : "")
-                : ""
-              opacity: 0.75
-              elide: Text.ElideRight
-            }
-
-            Caption {
-              id: limitPercent
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              text: limitRow.window ? limitRow.window.text : ""
-              color: band.levelColor(limitRow.window, band.foreground)
-            }
-
-            Meter {
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.bottom: parent.bottom
-              share: limitRow.window ? limitRow.window.percent : 0
-              alarming: limitRow.window ? limitRow.window.alarming : false
-              warning: limitRow.window ? limitRow.window.warning : false
-            }
-          }
-        }
-      }
-
-      Column {
-        width: parent.width
-        spacing: Style.space(2)
-        visible: band.showDays && providerBlock.provider && providerBlock.provider.days && providerBlock.provider.days.length > 0
-
-        Item {
-          width: parent.width
-          height: daysTitle.implicitHeight
-
-          Caption {
-            id: daysTitle
-            text: "Last 7 days"
-            opacity: 0.4
-          }
-
-          Caption {
-            anchors.right: parent.right
-            text: providerBlock.provider && providerBlock.provider.activity ? "today " + providerBlock.provider.activity : ""
-            opacity: 0.5
-          }
-        }
-
-        Repeater {
-          model: providerBlock.provider && providerBlock.provider.days ? providerBlock.provider.days.length : 0
-
-          delegate: Item {
-            id: dayRow
-            required property int index
-            readonly property var day: providerBlock.provider.days[index]
-            width: providerBlock.width
-            height: band.lineHeight
-
-            Caption {
-              id: dayName
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-              width: dayMetrics.width + Style.space(10)
-              text: dayRow.day ? dayRow.day.day : ""
-              font.bold: dayRow.day && dayRow.day.today
-              opacity: dayRow.day && dayRow.day.today ? 1 : 0.6
-            }
-
-            Caption {
-              id: dayTokens
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              width: tokenMetrics.width
-              horizontalAlignment: Text.AlignRight
-              text: dayRow.day ? dayRow.day.label : ""
-              font.bold: dayRow.day && dayRow.day.today
-            }
-
-            Meter {
-              anchors.left: dayName.right
-              anchors.right: dayTokens.left
-              anchors.rightMargin: Style.space(10)
-              anchors.verticalCenter: parent.verticalCenter
-              share: dayRow.day ? dayRow.day.share : 0
-              fill: Util.alpha(band.accent, dayRow.day && dayRow.day.today ? 1 : 0.6)
-              trackAlpha: 0.12
-            }
-          }
-        }
-      }
-
-      Column {
-        width: parent.width
-        spacing: Style.space(2)
-        visible: providerBlock.provider && providerBlock.provider.models.length > 0
-
-        Caption {
-          text: "Models"
-          opacity: 0.4
-        }
-
-        Repeater {
-          model: providerBlock.provider ? providerBlock.provider.models.length : 0
-
-          delegate: Item {
-            id: modelRow
-            required property int index
-            readonly property var stats: providerBlock.provider.models[index]
-            width: providerBlock.width
-            height: Math.max(band.lineHeight, Style.font.caption * 2 + Style.space(8))
-
-            Caption {
-              id: modelTotal
-              anchors.right: parent.right
-              anchors.top: parent.top
-              text: modelRow.stats ? modelRow.stats.totalLabel : ""
-            }
-
-            Caption {
-              anchors.left: parent.left
-              anchors.right: modelTotal.left
-              anchors.rightMargin: Style.space(8)
-              anchors.top: parent.top
-              text: modelRow.stats ? modelRow.stats.name + (modelRow.stats.cost ? "  ·  " + modelRow.stats.cost : "") : ""
-              elide: Text.ElideRight
-            }
-
-            Caption {
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.bottom: modelBar.top
-              anchors.bottomMargin: Style.space(2)
-              text: modelRow.stats ? modelRow.stats.detail : ""
-              opacity: 0.45
-              elide: Text.ElideRight
-            }
-
-            Meter {
-              id: modelBar
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.bottom: parent.bottom
-              share: modelRow.stats ? modelRow.stats.share : 0
-              fill: Util.alpha(band.accent, 0.85)
-              trackAlpha: 0.18
-            }
-          }
         }
       }
     }
