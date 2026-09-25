@@ -784,3 +784,10 @@ function barSummary(panels, choice) {
   }
 }
 
+// A tool's name with the share its fullest allowance has used, for the
+// popup's switch: "Claude 47%".
+function switchLabel(panel) {
+  if (!panel) return ""
+  var summary = barSummary([panel], panel.id)
+  return toolLabel(panel.id) + (summary ? " " + summary.text : "")
+}

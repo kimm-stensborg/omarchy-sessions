@@ -209,7 +209,8 @@ Panel {
                 required property var modelData
                 required property int index
                 width: toolSwitch.cellWidth
-                text: modelData.name
+                // Each tool's share, so the switch compares them at a glance.
+                text: Model.switchLabel(modelData)
                 selected: index === root.shownIndex
                 bordered: true
                 foreground: root.foreground

@@ -245,6 +245,13 @@ const bar = M.barSummary(M.usageFrom([{
   ]
 }], [], NOW, { percent: 0.79, resetsAt: "2026-09-28T08:30:00Z", products: [] }))
 check("the bar shows the fullest allowance of any subscription", [bar.tool, bar.text, bar.warning, bar.alarming], ["grok", "79%", true, false])
+check("the switch names each tool with its fullest share", M.usageFrom([{
+  id: "claude", name: "Claude Code", todayTokens: 0, models: [],
+  limits: [
+    { label: "Session (5-hour)", percent: 0.47, resetsAt: "2026-09-25T14:00:00Z" },
+    { label: "Weekly (7-day)", percent: 0.34, resetsAt: "2026-09-27T03:00:00Z" }
+  ]
+}], [], NOW).map(M.switchLabel), ["Claude 47%"])
 check("no allowances leaves the bar empty", M.barSummary([]), null)
 const both = M.usageFrom([{
   id: "claude", name: "Claude Code", todayTokens: 0, models: [],
