@@ -190,8 +190,10 @@ Item {
       root.statusMessage = String(payload.warnings[0])
   }
 
+  // Stops at the newest and the oldest rather than wrapping round, so Up
+  // always heads back towards the newest.
   function move(delta) {
-    if (root.count > 0) root.selectAbsolute((root.selected + delta + root.count) % root.count)
+    root.selectAbsolute(root.selected + delta)
   }
 
   function selectAbsolute(index) {
