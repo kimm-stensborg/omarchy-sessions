@@ -182,6 +182,18 @@ class Windows(unittest.TestCase):
         found = self.describe([{"address": "0x1", "pid": 300}, {"address": "0x2", "pid": 300}])
         self.assertEqual([row["text"] for row in found], ["foot --server", "foot --server"])
 
+    def test_a_multiplexer_pane_carries_its_own_sessions(self):
+        parents = {100: 1, 101: 100, 102: 101, 110: 102, 111: 110, 120: 102, 121: 120}
+        marks = {111: ["claude", "c-one"], 121: ["claude", "c-two"]}
+        panes = [
+            {"pane": "w1:p1", "tab": "w1:t1", "workspace": "w1", "shell": 110},
+            {"pane": "w2:p1", "tab": "w2:t1", "workspace": "w2", "shell": 120},
+            {"pane": "w9:p1", "tab": "w9:t1", "workspace": "w9", "shell": 999},
+        ]
+        found = scan.describe_windows([{"address": "0x1", "pid": 100}], parents, lambda pid: marks.get(pid, []), panes)[0]
+        self.assertEqual([(p["pane"], p["text"]) for p in found["panes"]], [("w1:p1", "claude\nc-one"), ("w2:p1", "claude\nc-two")])
+        self.assertIn("c-two", found["text"])
+
     def test_focus_tries_the_lua_dispatcher_first(self):
         commands = scan.focus_commands("0x1f")
         self.assertEqual(commands[0][2], 'hl.dsp.focus({ window = "address:0x1f" })')

@@ -303,6 +303,17 @@ function matchClient(session, clients) {
   return null
 }
 
+// The multiplexer pane inside `client` that runs this session, if any.
+function matchPane(session, client) {
+  var id = session && session.id ? String(session.id) : ""
+  var panes = (client && client.panes) || []
+  if (!id) return null
+  for (var i = 0; i < panes.length; i++) {
+    if (str(panes[i].text).indexOf(id) !== -1 && panes[i].pane) return panes[i]
+  }
+  return null
+}
+
 // The sessions some window is already running, as { id: true }.
 function runningIds(sessions, clients) {
   var running = {}

@@ -846,12 +846,48 @@ def process_marks(pid, running):
     return [mark for mark in marks if mark]
 
 
-def describe_windows(clients, parents, marks_of):
+def run_json(command, timeout=3):
+    try:
+        completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout)
+        return json.loads(completed.stdout or "null")
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return None
+
+
+def herdr_panes():
+    """Every herdr pane with the pid of the shell it runs, from herdr's own
+    socket API. Empty when herdr is not installed or not running."""
+    if shutil.which("herdr") is None:
+        return []
+    listing = run_json(["herdr", "pane", "list"])
+    result = listing.get("result") if isinstance(listing, dict) else None
+    panes = []
+    for pane in (result or {}).get("panes") or []:
+        if not isinstance(pane, dict) or not pane.get("pane_id"):
+            continue
+        info = run_json(["herdr", "pane", "process-info", "--pane", str(pane["pane_id"])])
+        details = ((info or {}).get("result") or {}).get("process_info") or {}
+        shell = details.get("shell_pid")
+        if isinstance(shell, int) and shell > 0:
+            panes.append({
+                "pane": str(pane["pane_id"]),
+                "tab": str(pane.get("tab_id") or ""),
+                "workspace": str(pane.get("workspace_id") or ""),
+                "shell": shell,
+            })
+    return panes
+
+
+def describe_windows(clients, parents, marks_of, panes=()):
     """Each window with the marks of every process running inside it.
 
     A terminal running as a server owns several windows under one pid. Its
     children cannot be told apart by window, so such a pid only contributes
     its own command line.
+
+    A multiplexer's panes whose shell runs inside the window are listed on
+    it with their own marks, so a session can be brought forward in its pane
+    and not only its window.
     """
     pids = [client.get("pid") for client in clients if isinstance(client, dict)]
     described = []
@@ -863,31 +899,34 @@ def describe_windows(clients, parents, marks_of):
         if not isinstance(address, str) or not address:
             continue
         marks = []
+        inside = []
         if isinstance(pid, int) and pid > 0:
             tree = process_tree(pid, parents) if pids.count(pid) == 1 else [pid]
             for member in tree:
                 marks.extend(marks_of(member))
-        described.append({"address": address, "text": "\n".join(marks)})
+            for pane in panes:
+                if pane["shell"] not in tree:
+                    continue
+                pane_marks = []
+                for member in process_tree(pane["shell"], parents):
+                    pane_marks.extend(marks_of(member))
+                inside.append({
+                    "pane": pane["pane"],
+                    "tab": pane["tab"],
+                    "workspace": pane["workspace"],
+                    "text": "\n".join(pane_marks),
+                })
+        described.append({"address": address, "text": "\n".join(marks), "panes": inside})
     return described
 
 
 def window_clients(home=None):
     home = Path(home) if home else home_dir()
-    try:
-        completed = subprocess.run(
-            ["hyprctl", "clients", "-j"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        clients = json.loads(completed.stdout or "[]")
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        return []
+    clients = run_json(["hyprctl", "clients", "-j"])
     if not isinstance(clients, list):
         return []
     running = {**claude_running(home), **grok_running(home)}
-    return describe_windows(clients, process_parents(), lambda pid: process_marks(pid, running))
+    return describe_windows(clients, process_parents(), lambda pid: process_marks(pid, running), herdr_panes())
 
 
 def launch(cwd, argv):
@@ -917,7 +956,23 @@ def focus_commands(address):
     ]
 
 
-def focus(address):
+def focus_pane(pane, tab, workspace):
+    """Bring a herdr pane forward: directly when herdr sees an agent in it,
+    otherwise by its workspace and tab."""
+    if shutil.which("herdr") is None or not pane:
+        return False
+    agent = run_json(["herdr", "agent", "focus", pane])
+    if isinstance(agent, dict) and agent.get("result"):
+        return True
+    ok = True
+    if workspace:
+        ok = isinstance(run_json(["herdr", "workspace", "focus", workspace]), dict) and ok
+    if tab:
+        ok = isinstance(run_json(["herdr", "tab", "focus", tab]), dict) and ok
+    return ok and bool(workspace or tab)
+
+
+def focus(address, pane="", tab="", workspace=""):
     if not address or not re.fullmatch(r"0x[0-9a-fA-F]+", str(address)):
         return {"ok": False, "error": "not a window"}
     error = "could not focus that window"
@@ -928,6 +983,10 @@ def focus(address):
             error = str(exc)
             continue
         if completed.returncode == 0 and completed.stdout.strip() == "ok":
+            # The window is forward either way; a pane that will not come
+            # forward still leaves you in the right terminal.
+            if pane:
+                focus_pane(pane, tab, workspace)
             return {"ok": True}
     return {"ok": False, "error": error}
 
@@ -943,7 +1002,8 @@ def main(argv):
         "usage": collect_usage,
         "clients": window_clients,
         "launch": lambda: launch(args[0], args[1:]),
-        "focus": lambda: focus(args[0] if args else ""),
+        # focus <address> [<pane> <tab> <workspace>]
+        "focus": lambda: focus(*(args[:4] or [""])),
     }
     if command not in commands:
         return reply({"ok": False, "error": "unknown command"}, 1)

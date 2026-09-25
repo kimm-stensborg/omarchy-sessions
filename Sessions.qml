@@ -253,7 +253,10 @@ Item {
       // Closed first: while the overlay holds the keyboard, Hyprland hands
       // focus back to the previous window as it goes, undoing the focus.
       root.close()
-      actProc.command = root.scanCommand(["focus", hit.address])
+      var pane = Model.matchPane(row, hit)
+      actProc.command = root.scanCommand(pane
+        ? ["focus", hit.address, pane.pane, pane.tab || "", pane.workspace || ""]
+        : ["focus", hit.address])
     } else {
       var argv = Model.resumeArgv(row)
       if (!argv) return

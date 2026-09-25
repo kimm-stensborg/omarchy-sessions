@@ -116,6 +116,11 @@ check("a window matches only when the session id is among what runs in it", M.ma
   { address: "0x1", text: "foot --working-directory=/home/kimm/Projects/casino\ngrok" },
   { address: "0x2", text: "foot\nbash\ngrok\ng1" }
 ]).address, "0x2")
+check("the pane inside the window that runs the session", M.matchPane(sessions[0], {
+  address: "0x2", text: "herdr\ngrok\ng1",
+  panes: [{ pane: "w1:p1", text: "bash" }, { pane: "w2:p1", tab: "w2:t1", workspace: "w2", text: "grok\ng1" }]
+}).pane, "w2:p1")
+check("a window without panes has no pane to match", M.matchPane(sessions[0], { address: "0x2", text: "g1" }), null)
 check("no id in any window is no match", M.matchClient(sessions[0], [
   { address: "0x1", text: "foot\ngrok" }
 ]), null)

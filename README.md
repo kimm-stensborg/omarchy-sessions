@@ -8,7 +8,7 @@ The panel keeps a title, the folder and how long ago. The transcript stays in th
 
 Each folder gets a header with how many sessions are under it. A dot in front of a session means a window is already running it, so Enter will bring that window forward rather than open another. Each tool has its own colour, taken from the theme, on its chip and beside its name in the list. While you type, the words that matched light up in titles and folder names. An allowance turns amber at three quarters used and red at 90%.
 
-A session counts as already running in a window when its id turns up anywhere inside that window: on the command line of the terminal or of anything started in it, including panes of a multiplexer, in a file one of those processes has open, or in what the tool records for that process. Claude writes one to `~/.claude/sessions/<pid>.json` and Grok to `~/.grok/active_sessions.json`. Cursor's `agent` names its conversation in the log it keeps open. Codex is recognized when it was started with `codex resume <id>`. A terminal running as a server, one process behind several windows, can't be told apart per window, so only its own command line counts.
+A session counts as already running in a window when its id turns up anywhere inside that window: on the command line of the terminal or of anything started in it, including panes of a multiplexer, in a file one of those processes has open, or in what the tool records for that process. Claude writes one to `~/.claude/sessions/<pid>.json` and Grok to `~/.grok/active_sessions.json`. Cursor's `agent` names its conversation in the log it keeps open. Codex is recognized when it was started with `codex resume <id>`. A terminal running as a server, one process behind several windows, can't be told apart per window, so only its own command line counts. When the session runs in a [herdr](https://herdr.dev) pane, that pane is brought forward too, not just the window holding it.
 
 - **Plugin ID:** `io.github.kimm-stensborg.sessions`
 - **Kind:** `overlay`
@@ -100,7 +100,7 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 | `Sessions.qml` | The panel: search line, chips and the session list. |
 | `UsageBand.qml` | The subscription rows above the list, and their limits and models when opened. |
 | `Model.js` | Titles, grouping, search, the resume command, and which window is already that session. |
-| `scan.py` | Reading the four tools' session files, and launching or focusing. |
+| `scan.py` | Reading the four tools' session files, and launching or focusing, herdr panes included. |
 | `test.js` | `Model.js`. |
 | `test_scan.py` | `scan.py`. |
 | `install.sh` | The shortcut and enabling the plugin. |
