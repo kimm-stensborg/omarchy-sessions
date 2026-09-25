@@ -136,7 +136,9 @@ Item {
       chips.push(present[i])
       if (present[i].id === root.tool) stillThere = true
     }
-    if (!stillThere) root.tool = ""
+    // Before the sessions arrive no tool is present yet; that is not a reason
+    // to drop the one asked for (the window scan can finish first).
+    if (!stillThere && root.sessions.length > 0) root.tool = ""
     root.chips = chips
     var built = Model.rows(root.sessions, root.queryText, root.tool, Date.now(), root.home,
       Model.runningIds(root.sessions, root.clients))
