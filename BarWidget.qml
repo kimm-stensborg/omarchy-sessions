@@ -6,9 +6,8 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// The AI usage bar button, in place of Omarchy's Agents: the tool's colour,
-// a small meter and the share used, amber from three quarters and red near
-// the end. Which tool is set in the popup ("Show in bar"); by default it is
+// The AI usage bar button, in place of Omarchy's Agents: its glyph and the
+// share used, amber from three quarters and red near the end. Which tool is set in the popup ("Show in bar"); by default it is
 // whichever allowance is fullest. Left click opens the usage popup, middle
 // click the Sessions search. The tooltip lists every allowance.
 //
@@ -159,7 +158,6 @@ BarWidget {
   Binding { target: popup.item; property: "hostWidget"; value: root; when: popup.item !== null }
   Binding { target: popup.item; property: "panels"; value: root.panels; when: popup.item !== null }
   Binding { target: popup.item; property: "barTool"; value: root.barTool; when: popup.item !== null }
-  Binding { target: popup.item; property: "themeColors"; value: root.themeColors; when: popup.item !== null }
   Binding { target: popup.item; property: "warningColor"; value: root.warningColor; when: popup.item !== null }
   Binding { target: popup.item; property: "refreshing"; value: refreshProc.running || forceProc.running; when: popup.item !== null }
 
@@ -204,7 +202,7 @@ BarWidget {
     }
   }
 
-  // The meter and the percent are two items rather than one button: the
+  // The glyph and the percent are two items rather than one button: the
   // kit's bar button paints either a glyph or a label. The label carries the
   // same clicks and tooltip so the pair behaves as one.
   Row {
@@ -216,7 +214,9 @@ BarWidget {
       bar: root.bar
       slotSize: Style.bar.statusSlot
       tooltipText: root.summary && !root.opened ? root.summary.tooltip : ""
-      iconComponent: meter
+      // The glyph Omarchy's Agents widget wears, so the button reads as the one it replaces.
+      text: "󱚣"
+      active: !!root.summary && root.summary.alarming
       onPressed: function(which) { root.press(which) }
     }
 
@@ -245,42 +245,6 @@ BarWidget {
         onEntered: if (root.bar && root.summary && !root.opened) root.bar.showTooltip(button, root.summary.tooltip)
         onExited: if (root.bar) root.bar.hideTooltip(button)
         onPressed: function(mouse) { root.press(mouse.button) }
-      }
-    }
-  }
-
-  // The tool's colour, then a short track filled to the share used, on the
-  // icon canvas.
-  Component {
-    id: meter
-
-    Item {
-      Rectangle {
-        id: toolDot
-        anchors.left: parent.left
-        anchors.verticalCenter: parent.verticalCenter
-        width: Math.max(4, Math.round(parent.height / 3))
-        height: width
-        radius: width / 2
-        color: root.summary ? Model.toolColor(root.summary.tool, root.themeColors, button.foreground) : button.foreground
-      }
-
-      Rectangle {
-        id: track
-        anchors.left: toolDot.right
-        anchors.leftMargin: Math.max(2, Math.round(parent.width / 8))
-        anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
-        height: Math.max(3, Math.round(parent.height / 4))
-        radius: height / 2
-        color: Util.alpha(button.foreground, 0.25)
-
-        Rectangle {
-          width: track.width * (root.summary ? Math.min(1, root.summary.percent) : 0)
-          height: track.height
-          radius: track.radius
-          color: root.levelColor
-        }
       }
     }
   }

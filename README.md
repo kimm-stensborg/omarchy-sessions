@@ -32,9 +32,9 @@ Above the list, each subscription that has numbers gets a column, side by side. 
 
 ## In the bar
 
-The bar widget takes the place of Omarchy's Agents widget: every AI subscription's usage in one bar button and one popup. The button shows a tool's colour, a small meter and the share used, amber from 75% and red from 90%. By default that is whichever allowance is closest to its limit; **Show in bar**, at the foot of the popup, picks one tool instead (the `barTool` setting: `fullest`, `claude`, `grok`, `codex`, `cursor` or `fireworks`). Hover it for every allowance and when it renews.
+The bar widget takes the place of Omarchy's Agents widget: every AI subscription's usage in one bar button and one popup. The button wears the Agents glyph and the share used, amber from 75% and red from 90%. By default that is whichever allowance is closest to its limit; **In the bar**, at the foot of the popup, steps to one tool instead (the `barTool` setting: `fullest`, `claude`, `grok`, `codex`, `cursor` or `fireworks`). Hover it for every allowance and when it renews.
 
-Left click opens the popup, one tool at a time: its allowances and when each renews, today's prompts and sessions, tokens for each of the last seven days, and the split by model. Middle click opens the Sessions search. In the popup, `h` / `l` or the arrows switch tool, `r` refreshes, `s` opens Sessions, Esc closes. A key can open it too:
+Left click opens the popup, laid out as the Agents panel is and one tool at a time: its mark, plan and today's prompts and sessions, then its limits and when each renews, its tokens for each of the last seven days, and its tokens by model. Middle click opens the Sessions search. In the popup, `h` / `l` or the arrows switch tool, `b` changes what the bar shows, `r` refreshes, `s` opens Sessions, Esc closes. A key can open it too:
 
 ```bash
 omarchy-shell io.github.kimm-stensborg.sessions.usage toggle
