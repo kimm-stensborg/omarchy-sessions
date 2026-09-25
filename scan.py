@@ -9,6 +9,7 @@ session ids the tools record per process.
 `launch` and `focus` do the two ways of going back to one.
 """
 
+import fcntl
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -543,6 +545,37 @@ def collect_usage(home=None):
         }
 
 
+def usage_cache_path():
+    root = os.environ.get("XDG_CACHE_HOME") or str(home_dir() / ".cache")
+    return Path(root) / "omarchy" / "sessions" / "usage.json"
+
+
+def cached_usage(max_age=None, path=None, collect=None):
+    """Usage, from the shared cache while it is younger than `max_age`
+    seconds, else collected afresh and written back.
+
+    Every monitor's bar asks at once when the shell starts. A lock makes the
+    later ones wait for the first, then find its fresh cache, so Grok and
+    Cursor are asked once however many bars there are. Without `max_age` the
+    numbers are always collected; the panel wants them current.
+    """
+    path = Path(path) if path else usage_cache_path()
+    collect = collect or collect_usage
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_suffix(".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if max_age is not None:
+            age = time.time() - (mtime_of(path) or 0)
+            cached = read_json(path) if age < max_age else None
+            if isinstance(cached, dict):
+                return cached
+        usage = collect()
+        partial = path.with_suffix(".tmp")
+        partial.write_text(json.dumps(usage), encoding="utf-8")
+        partial.replace(path)
+        return usage
+
+
 def percent_fraction(value):
     """The billing API reports 69.0 for 69 percent. The panel stores a fraction."""
     try:
@@ -999,7 +1032,8 @@ def main(argv):
         return reply({"ok": False, "error": "usage: launch <cwd> <binary> [args...]"}, 1)
     commands = {
         "list": collect,
-        "usage": collect_usage,
+        # usage [--max-age <seconds>]
+        "usage": lambda: cached_usage(float(args[1]) if args[:1] == ["--max-age"] and len(args) > 1 else None),
         "clients": window_clients,
         "launch": lambda: launch(args[0], args[1:]),
         # focus <address> [<pane> <tab> <workspace>]

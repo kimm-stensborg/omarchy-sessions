@@ -11,7 +11,7 @@ Each folder gets a header with how many sessions are under it. A dot in front of
 A session counts as already running in a window when its id turns up anywhere inside that window: on the command line of the terminal or of anything started in it, including panes of a multiplexer, in a file one of those processes has open, or in what the tool records for that process. Claude writes one to `~/.claude/sessions/<pid>.json` and Grok to `~/.grok/active_sessions.json`. Cursor's `agent` names its conversation in the log it keeps open. Codex is recognized when it was started with `codex resume <id>`. A terminal running as a server, one process behind several windows, can't be told apart per window, so only its own command line counts. When the session runs in a [herdr](https://herdr.dev) pane, that pane is brought forward too, not just the window holding it.
 
 - **Plugin ID:** `io.github.kimm-stensborg.sessions`
-- **Kind:** `overlay`
+- **Kinds:** `overlay`, `bar-widget`
 - **License:** MIT
 - **Requires:** Omarchy 4 (Quattro) with `omarchy-shell`
 
@@ -29,6 +29,8 @@ The recent sessions on this machine, not the whole history: up to forty Claude t
 A generated title is shown when the tool wrote one. Otherwise the first line you typed. Claude and Cursor name the project folder by replacing slashes, and that name is turned back into a real path by matching it against directories that exist, so `omarchy-notes` stays one folder. Claude's own record of the directory wins when the transcript has one.
 
 Above the list, each subscription that has numbers gets a column, side by side. Claude, Codex and Fireworks use the usage records Omarchy already writes for its agents panel: the allowance used, when it renews, today's tokens, and the per-model split. Click it, or the tool's chip, and its allowances and that split open in full. Grok's column is the weekly allowance from the same billing figure `/usage` shows, and under it the Build and Chat shares of that week. The model lines under Grok stay the sum of the session files on this machine. Cursor's column is the monthly plan from the same screen as `agent` `/usage`: the included percent, Auto and API inside it, and whether on-demand is on. A subscription with nothing recorded yet is left off the strip. Each allowance that renews gets its own line and meter, with when it renews: a countdown inside a day, the weekday and time inside a week, the date after that. Claude shows its week and, under it, its 5-hour session that way, so every column opens on its longest allowance. Shares inside an allowance, like Grok's Build and Chat or Cursor's Auto and API, wait for the full view.
+
+The bar widget shows the fullest allowance of any subscription as a small meter and a percent, amber from 75% and red from 90%. Hover it for every allowance and when it renews; click it to open Sessions. Enabling the plugin puts it on the bar. Its numbers come from a cache at `~/.cache/omarchy/sessions/usage.json`, which the bars refresh every five minutes and the panel refreshes whenever it opens, so every monitor's bar and the panel agree and Grok and Cursor are asked once however many bars there are.
 
 Opening the panel asks `cli-chat-proxy.grok.com` for Grok's weekly figure, using the sign-in in `~/.grok/auth.json`, and `api2.cursor.sh` for Cursor's, using `~/.config/cursor/auth.json`. If the Grok request fails, the newest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl` is used instead.
 
@@ -98,9 +100,10 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 | File | Owns |
 |------|------|
 | `Sessions.qml` | The panel: search line, chips and the session list. |
+| `BarWidget.qml` | The bar button: the fullest allowance, its tooltip, and the five-minute refresh. |
 | `UsageBand.qml` | The subscription rows above the list, and their limits and models when opened. |
 | `Model.js` | Titles, grouping, search, the resume command, and which window is already that session. |
-| `scan.py` | Reading the four tools' session files, and launching or focusing, herdr panes included. |
+| `scan.py` | Reading the four tools' session files, the usage cache, and launching or focusing, herdr panes included. |
 | `test.js` | `Model.js`. |
 | `test_scan.py` | `scan.py`. |
 | `install.sh` | The shortcut and enabling the plugin. |

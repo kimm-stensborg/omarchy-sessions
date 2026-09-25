@@ -278,6 +278,24 @@ class Allowance(unittest.TestCase):
         self.assertEqual(parsed["resetsAt"], "2026-09-28T08:30:00Z")
 
 
+class UsageCache(unittest.TestCase):
+    def test_a_fresh_cache_answers_and_a_stale_one_is_replaced(self):
+        calls = []
+
+        def collect():
+            calls.append(1)
+            return {"n": len(calls)}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "usage.json"
+            self.assertEqual(scan.cached_usage(300, path, collect), {"n": 1})
+            self.assertEqual(scan.cached_usage(300, path, collect), {"n": 1})
+            os.utime(path, (0, 0))
+            self.assertEqual(scan.cached_usage(300, path, collect), {"n": 2})
+            self.assertEqual(scan.cached_usage(None, path, collect), {"n": 3})
+            self.assertEqual(json.loads(path.read_text()), {"n": 3})
+
+
 class Usage(unittest.TestCase):
     def test_subscription_record_and_grok_session_file(self):
         with tempfile.TemporaryDirectory() as tmp:

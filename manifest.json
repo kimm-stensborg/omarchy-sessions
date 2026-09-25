@@ -6,7 +6,20 @@
   "author": "Kimm Stensborg",
   "license": "MIT",
   "description": "Find a Claude, Grok, Codex or Cursor session and resume it",
-  "kinds": ["overlay"],
+  "kinds": [
+    "overlay",
+    "bar-widget"
+  ],
   "keepLoaded": true,
-  "entryPoints": { "overlay": "Sessions.qml" }
+  "entryPoints": {
+    "overlay": "Sessions.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Sessions",
+    "description": "The fullest AI subscription allowance at a glance; opens Sessions",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
 }

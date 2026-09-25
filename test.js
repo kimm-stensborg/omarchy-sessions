@@ -237,6 +237,18 @@ check("grok with only this machine's numbers has no allowance lines", M.usageFro
   { models: [{ id: "grok-4.7-build", input: 1000, output: 0, cacheRead: 0, cacheWrite: 0, costTicks: 0 }] }
 ], NOW)[0].summary, [])
 
+const bar = M.barSummary(M.usageFrom([{
+  id: "claude", name: "Claude Code", todayTokens: 0, models: [],
+  limits: [
+    { label: "Session (5-hour)", percent: 0.28, resetsAt: "2026-09-25T13:20:00Z" },
+    { label: "Weekly (7-day)", percent: 0.32, resetsAt: "2026-09-27T03:00:00Z" }
+  ]
+}], [], NOW, { percent: 0.79, resetsAt: "2026-09-28T08:30:00Z", products: [] }))
+check("the bar shows the fullest allowance of any subscription", [bar.tool, bar.text, bar.warning, bar.alarming], ["grok", "79%", true, false])
+check("the bar's tooltip lists every allowance", bar.tooltip,
+  "Claude Code: week 32% (renews Sun 03:00), session 28% (renews in 1h 20m)\nGrok: week 79% (renews Mon 08:30)")
+check("no allowances leaves the bar empty", M.barSummary([]), null)
+
 if (failures.length) {
   console.log(failures.join("\n"))
   console.log(failures.length + " failed, " + (checks - failures.length) + " ok")

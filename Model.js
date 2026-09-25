@@ -668,3 +668,32 @@ function usageFrom(subscriptions, grokSessions, now, allowance, cursorAllowance)
   return panels
 }
 
+// What the bar shows: the fullest allowance of any subscription, so the one
+// about to run out is the one in view, and every allowance in the tooltip.
+function barSummary(panels) {
+  var list = panels || []
+  var fullest = null
+  var owner = null
+  var tooltip = []
+  for (var i = 0; i < list.length; i++) {
+    var lines = list[i].summary || []
+    var parts = []
+    for (var l = 0; l < lines.length; l++) {
+      parts.push(lines[l].short + " " + lines[l].text + (lines[l].reset ? " (" + lines[l].reset + ")" : ""))
+      if (!fullest || lines[l].percent > fullest.percent) {
+        fullest = lines[l]
+        owner = list[i]
+      }
+    }
+    if (parts.length) tooltip.push(list[i].name + ": " + parts.join(", "))
+  }
+  if (!fullest) return null
+  return {
+    tool: owner.id,
+    percent: fullest.percent,
+    text: fullest.text,
+    warning: fullest.warning,
+    alarming: fullest.alarming,
+    tooltip: tooltip.join("\n")
+  }
+}
