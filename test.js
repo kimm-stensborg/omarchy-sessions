@@ -245,8 +245,6 @@ const bar = M.barSummary(M.usageFrom([{
   ]
 }], [], NOW, { percent: 0.79, resetsAt: "2026-09-28T08:30:00Z", products: [] }))
 check("the bar shows the fullest allowance of any subscription", [bar.tool, bar.text, bar.warning, bar.alarming], ["grok", "79%", true, false])
-check("the bar's tooltip lists every allowance", bar.tooltip,
-  "Claude Code: week 32% (renews Sun 03:00), session 28% (renews in 1h 20m)\nGrok: week 79% (renews Mon 08:30)")
 check("no allowances leaves the bar empty", M.barSummary([]), null)
 const both = M.usageFrom([{
   id: "claude", name: "Claude Code", todayTokens: 0, models: [],

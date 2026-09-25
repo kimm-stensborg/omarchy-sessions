@@ -749,8 +749,7 @@ function barChoices(panels) {
 }
 
 // What the bar shows: the fullest allowance of the chosen tool, or of any
-// tool when the choice is "fullest" or names one with nothing to show, and
-// every allowance in the tooltip.
+// tool when the choice is "fullest" or names one with nothing to show.
 function barSummary(panels, choice) {
   var list = panels || []
   var wanted = str(choice) || BAR_FULLEST
@@ -758,12 +757,9 @@ function barSummary(panels, choice) {
   var owner = null
   var fallback = null
   var fallbackOwner = null
-  var tooltip = []
   for (var i = 0; i < list.length; i++) {
     var lines = list[i].summary || []
-    var parts = []
     for (var l = 0; l < lines.length; l++) {
-      parts.push(lines[l].short + " " + lines[l].text + (lines[l].reset ? " (" + lines[l].reset + ")" : ""))
       if (!fallback || lines[l].percent > fallback.percent) {
         fallback = lines[l]
         fallbackOwner = list[i]
@@ -773,7 +769,6 @@ function barSummary(panels, choice) {
         owner = list[i]
       }
     }
-    if (parts.length) tooltip.push(list[i].name + ": " + parts.join(", "))
   }
   if (!fullest) {
     fullest = fallback
@@ -785,7 +780,7 @@ function barSummary(panels, choice) {
     percent: fullest.percent,
     text: fullest.text,
     warning: fullest.warning,
-    alarming: fullest.alarming,
-    tooltip: tooltip.join("\n")
+    alarming: fullest.alarming
   }
 }
+

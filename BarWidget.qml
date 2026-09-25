@@ -9,7 +9,7 @@ import "Model.js" as Model
 // The AI usage bar button, in place of Omarchy's Agents: its glyph and the
 // share used, amber from three quarters and red near the end. Which tool is set in the popup ("Show in bar"); by default it is
 // whichever allowance is fullest. Left click opens the usage popup, middle
-// click the Sessions search. The tooltip lists every allowance.
+// click the Sessions search.
 //
 // The numbers come from the cache scan.py keeps, so every monitor's bar and
 // the panel agree. Each bar asks for a refresh every five minutes, and the
@@ -190,7 +190,7 @@ BarWidget {
     onExited: cacheFile.reload()
   }
 
-  // Also re-reads the cache so the renewal countdowns in the tooltip move on.
+  // Also re-reads the cache so the renewal countdowns move on.
   Timer {
     interval: root.refreshSeconds * 1000
     running: true
@@ -204,7 +204,7 @@ BarWidget {
 
   // The glyph and the percent are two items rather than one button: the
   // kit's bar button paints either a glyph or a label. The label carries the
-  // same clicks and tooltip so the pair behaves as one.
+  // same clicks so the pair behaves as one.
   Row {
     id: row
     spacing: 0
@@ -213,10 +213,11 @@ BarWidget {
       id: button
       bar: root.bar
       slotSize: Style.bar.statusSlot
-      tooltipText: root.summary && !root.opened ? root.summary.tooltip : ""
       // The glyph Omarchy's Agents widget wears, so the button reads as the one it replaces.
       text: "󱚣"
-      active: !!root.summary && root.summary.alarming
+      // Glyph and percent share one colour, amber or red as the allowance runs out.
+      active: !!root.summary && (root.summary.warning || root.summary.alarming)
+      activeColor: root.levelColor
       onPressed: function(which) { root.press(which) }
     }
 
@@ -240,10 +241,7 @@ BarWidget {
       MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
-        hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
-        onEntered: if (root.bar && root.summary && !root.opened) root.bar.showTooltip(button, root.summary.tooltip)
-        onExited: if (root.bar) root.bar.hideTooltip(button)
         onPressed: function(mouse) { root.press(mouse.button) }
       }
     }
