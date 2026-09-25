@@ -68,7 +68,10 @@ Item {
   readonly property int headerHeight: Math.max(Style.space(34), Style.font.heading + Style.spacing.controlPaddingY * 2)
   readonly property int metaLineHeight: Math.max(Style.space(26), Style.font.caption + Style.space(12))
   readonly property int footerHeight: Math.max(Style.space(20), Style.font.caption + Style.space(6))
-  readonly property int rowHeight: Math.max(Style.space(46), Style.font.body + Style.font.caption + Style.spacing.rowPaddingX * 2)
+  readonly property int rowHeight: Math.max(Style.space(34), Style.font.title + Style.space(16))
+  // Row text sits this far inside its highlight. The list reaches out by the
+  // same amount, so the text lines up with the search line and chips.
+  readonly property int rowInset: Style.space(10)
   readonly property int headerRowHeight: Math.max(Style.space(28), Style.font.caption + Style.space(14))
   readonly property int cardWidth: Math.min(Style.space(820), panel.width - Style.gapsOut * 2)
   readonly property int cardHeight: Math.min(Style.space(640), panel.height - Style.gapsOut * 2)
@@ -287,6 +290,21 @@ Item {
     }
   }
 
+  // The widest tool name and age, so both columns line up down the list.
+  TextMetrics {
+    id: toolMetrics
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.caption
+    text: "Cursor"
+  }
+
+  TextMetrics {
+    id: whenMetrics
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.caption
+    text: "just now"
+  }
+
   PointerMoveGate {
     id: pointerGate
     referenceItem: card
@@ -376,17 +394,45 @@ Item {
           height: root.headerHeight
 
           Text {
+            id: queryLine
             textFormat: Text.PlainText
             anchors.left: parent.left
             anchors.right: statusLine.left
             anchors.rightMargin: Style.space(12)
             anchors.verticalCenter: parent.verticalCenter
             text: root.queryText || "Find a session…"
+            leftPadding: root.queryText ? 0 : caret.width + Style.space(6)
             color: root.foreground
             opacity: root.queryText ? 1 : 0.58
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
             elide: Text.ElideRight
+          }
+
+          Rectangle {
+            id: caret
+            x: root.queryText ? Math.min(queryLine.contentWidth, queryLine.width) + Style.space(2) : 0
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.max(2, Style.space(2))
+            height: Style.font.heading + Style.space(4)
+            color: root.accent
+
+            SequentialAnimation on opacity {
+              running: root.opened
+              loops: Animation.Infinite
+              NumberAnimation { to: 1; duration: 0 }
+              PauseAnimation { duration: 530 }
+              NumberAnimation { to: 0; duration: 0 }
+              PauseAnimation { duration: 530 }
+            }
+          }
+
+          Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: Style.normalBorderWidth
+            color: Util.alpha(root.borderColor, 0.2)
           }
 
           Text {
@@ -476,6 +522,8 @@ Item {
           ListView {
             id: resultList
             anchors.fill: parent
+            anchors.leftMargin: -root.rowInset
+            anchors.rightMargin: -root.rowInset
             model: root.viewRows.length
             clip: true
             spacing: Style.space(2)
@@ -497,7 +545,7 @@ Item {
                 visible: sessionRow.header
                 textFormat: Text.PlainText
                 anchors.left: parent.left
-                anchors.leftMargin: Style.space(10)
+                anchors.leftMargin: root.rowInset
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: Style.space(2)
                 text: sessionRow.entry ? sessionRow.entry.project : ""
@@ -512,8 +560,10 @@ Item {
                 visible: !sessionRow.header
                 textFormat: Text.PlainText
                 anchors.right: parent.right
-                anchors.rightMargin: Style.space(10)
+                anchors.rightMargin: root.rowInset
                 anchors.verticalCenter: parent.verticalCenter
+                width: whenMetrics.width
+                horizontalAlignment: Text.AlignRight
                 text: sessionRow.entry && sessionRow.entry.when ? sessionRow.entry.when : ""
                 color: root.foreground
                 opacity: 0.45
@@ -521,35 +571,35 @@ Item {
                 font.pixelSize: Style.font.caption
               }
 
-              Column {
-                visible: !sessionRow.header
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(10)
+              Text {
+                id: rowTool
+                // Picking a tool's chip makes the column say the same thing on every row.
+                visible: !sessionRow.header && root.tool === ""
+                textFormat: Text.PlainText
                 anchors.right: rowWhen.left
-                anchors.rightMargin: Style.space(12)
+                anchors.rightMargin: Style.space(14)
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(1)
+                width: visible ? toolMetrics.width : 0
+                text: sessionRow.entry && sessionRow.entry.toolLabel ? sessionRow.entry.toolLabel : ""
+                color: root.foreground
+                opacity: 0.5
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
 
-                Text {
-                  textFormat: Text.PlainText
-                  width: parent.width
-                  text: sessionRow.entry && sessionRow.entry.title ? sessionRow.entry.title : ""
-                  color: sessionRow.hasCursor ? root.selectedText : root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.title
-                  elide: Text.ElideRight
-                }
-
-                Text {
-                  textFormat: Text.PlainText
-                  width: parent.width
-                  text: sessionRow.entry && sessionRow.entry.toolLabel ? sessionRow.entry.toolLabel : ""
-                  color: root.foreground
-                  opacity: 0.5
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                }
+              Text {
+                visible: !sessionRow.header
+                textFormat: Text.PlainText
+                anchors.left: parent.left
+                anchors.leftMargin: root.rowInset
+                anchors.right: rowTool.visible ? rowTool.left : rowWhen.left
+                anchors.rightMargin: Style.space(14)
+                anchors.verticalCenter: parent.verticalCenter
+                text: sessionRow.entry && sessionRow.entry.title ? sessionRow.entry.title : ""
+                color: sessionRow.hasCursor ? root.selectedText : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.title
+                elide: Text.ElideRight
               }
 
               MouseArea {

@@ -55,6 +55,16 @@ check("cursor without a directory keeps the fallback name", sessions[3].project,
 check("headers follow the newest session in each folder", M.rows(sessions, "", "", NOW, HOME).rows.filter(r => r.kind === "header").map(r => r.project),
   ["casino", "omarchy-notes", "notes", "kvittering"])
 
+const interleaved = M.normalize([
+  { tool: "claude", id: "a1", cwd: "/p/arcade", updated: NOW, title: "newest" },
+  { tool: "grok", id: "b1", cwd: "/p/bar", updated: NOW - 1, title: "between" },
+  { tool: "claude", id: "a2", cwd: "/p/arcade", updated: NOW - 2, title: "older" }
+], HOME)
+const grouped = M.rows(interleaved, "", "", NOW, HOME).rows
+check("a folder gets one header, placed by its newest session", grouped.map(r => r.kind === "header" ? "#" + r.project : r.id),
+  ["#arcade", "a1", "a2", "#bar", "b1"])
+check("the keyboard order follows the screen", grouped.filter(r => r.kind === "session").map(r => r.cursor), [0, 1, 2])
+
 const sameName = M.normalize([
   { tool: "claude", id: "a", cwd: "/home/kimm/Projects/notes", updated: NOW, title: "One" },
   { tool: "claude", id: "b", cwd: "/home/kimm/Work/notes", updated: NOW - 1, title: "Two" }

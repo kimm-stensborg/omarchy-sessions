@@ -1,9 +1,9 @@
 import QtQuick
 import qs.Commons
 
-// The strip above the list: a row per subscription with its headline and a
-// meter. Expanded (one tool picked), the row opens into its limits and its
-// per-model split instead.
+// The strip above the list: the subscriptions side by side, each with its
+// headline and a meter. Expanded (one tool picked), that subscription opens
+// into its limits and its per-model split instead.
 Column {
   id: band
 
@@ -46,8 +46,65 @@ Column {
     font.pixelSize: Style.font.caption
   }
 
+  Row {
+    id: summary
+    visible: !band.expanded
+    width: band.width
+    spacing: Style.space(18)
+
+    Repeater {
+      model: band.providers.length
+
+      delegate: Item {
+        id: cell
+        required property int index
+        readonly property var provider: band.providers[index]
+        width: (summary.width - summary.spacing * (band.providers.length - 1)) / Math.max(1, band.providers.length)
+        height: cellText.implicitHeight
+
+        Column {
+          id: cellText
+          width: parent.width
+          spacing: Style.space(3)
+
+          Caption {
+            width: parent.width
+            text: {
+              if (!cell.provider) return ""
+              var bits = [cell.provider.name]
+              if (cell.provider.tier) bits.push(cell.provider.tier)
+              return bits.join(" · ")
+            }
+            elide: Text.ElideRight
+          }
+
+          Caption {
+            width: parent.width
+            text: cell.provider ? (cell.provider.headline || cell.provider.todayLabel || "") : ""
+            color: cell.provider && cell.provider.alarming ? Color.urgent : band.foreground
+            opacity: cell.provider && cell.provider.alarming ? 1 : 0.6
+            elide: Text.ElideRight
+          }
+
+          Meter {
+            width: parent.width
+            height: Math.max(2, Style.space(3))
+            share: cell.provider ? cell.provider.meter : 0
+            alarming: cell.provider ? cell.provider.alarming : false
+          }
+        }
+
+        MouseArea {
+          anchors.fill: parent
+          cursorShape: Qt.PointingHandCursor
+          onClicked: if (cell.provider) band.picked(cell.provider.id)
+        }
+      }
+    }
+  }
+
   Repeater {
-    model: band.providers.length
+    model: band.expanded ? band.providers.length : 0
 
     delegate: Column {
       id: providerBlock
@@ -78,34 +135,15 @@ Column {
           id: providerAside
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          text: {
-            if (!providerBlock.provider) return ""
-            if (band.expanded) return providerBlock.provider.todayLabel || ""
-            return providerBlock.provider.headline || providerBlock.provider.todayLabel || ""
-          }
+          text: providerBlock.provider ? providerBlock.provider.todayLabel || "" : ""
           opacity: 0.7
         }
-
-        MouseArea {
-          anchors.fill: parent
-          enabled: !band.expanded && providerBlock.provider
-          cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-          onClicked: band.picked(providerBlock.provider.id)
-        }
-      }
-
-      Meter {
-        visible: !band.expanded && providerBlock.provider && providerBlock.provider.meter > 0
-        width: parent.width
-        height: Math.max(2, Style.space(3))
-        share: providerBlock.provider ? providerBlock.provider.meter : 0
-        alarming: providerBlock.provider ? providerBlock.provider.alarming : false
       }
 
       Column {
         width: parent.width
         spacing: Style.space(3)
-        visible: band.expanded && providerBlock.provider && providerBlock.provider.limits.length > 0
+        visible: providerBlock.provider && providerBlock.provider.limits.length > 0
 
         Repeater {
           model: providerBlock.provider ? providerBlock.provider.limits.length : 0
@@ -151,7 +189,7 @@ Column {
       Column {
         width: parent.width
         spacing: Style.space(2)
-        visible: band.expanded && providerBlock.provider && providerBlock.provider.models.length > 0
+        visible: providerBlock.provider && providerBlock.provider.models.length > 0
 
         Caption {
           text: "Models"

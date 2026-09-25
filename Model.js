@@ -143,41 +143,49 @@ function relativeTime(updated, now) {
   return date.getDate() + " " + MONTHS[date.getMonth()]
 }
 
-// Headers plus the sessions under them. `cursor` counts only the sessions,
-// which is what the keyboard moves through.
+// Headers plus the sessions under them. Each folder appears once, placed
+// by its newest session, with its sessions newest first beneath it.
+// `cursor` counts only the sessions, in the order they are shown, which is
+// what the keyboard moves through.
 function rows(sessions, query, tool, now, home) {
   var wanted = str(tool).trim()
+  var groups = []
+  var groupOf = {}
   var matched = []
   var source = sessions || []
-  for (var i = 0; i < source.length; i++) {
+  for (var i = 0; i < source.length && matched.length < LIST_LIMIT; i++) {
     if (wanted && source[i].tool !== wanted) continue
     if (!matches(source[i], query)) continue
     matched.push(source[i])
-    if (matched.length >= LIST_LIMIT) break
+    var key = source[i].key
+    if (!groupOf[key]) {
+      groupOf[key] = []
+      groups.push(key)
+    }
+    groupOf[key].push(source[i])
   }
   var labels = labelMap(matched, home)
   var out = []
   var cursor = 0
-  var lastKey = ""
-  for (var r = 0; r < matched.length; r++) {
-    var session = matched[r]
-    var label = labels[session.key] || session.project
-    if (session.key !== lastKey) {
-      out.push({ kind: "header", project: label, cwd: session.cwd })
-      lastKey = session.key
+  for (var g = 0; g < groups.length; g++) {
+    var members = groupOf[groups[g]]
+    var label = labels[groups[g]] || members[0].project
+    out.push({ kind: "header", project: label, cwd: members[0].cwd })
+    for (var m = 0; m < members.length; m++) {
+      var session = members[m]
+      out.push({
+        kind: "session",
+        cursor: cursor,
+        tool: session.tool,
+        toolLabel: toolLabel(session.tool),
+        id: session.id,
+        cwd: session.cwd,
+        title: session.title,
+        project: label,
+        when: relativeTime(session.updated, now)
+      })
+      cursor += 1
     }
-    out.push({
-      kind: "session",
-      cursor: cursor,
-      tool: session.tool,
-      toolLabel: toolLabel(session.tool),
-      id: session.id,
-      cwd: session.cwd,
-      title: session.title,
-      project: label,
-      when: relativeTime(session.updated, now)
-    })
-    cursor += 1
   }
   return { rows: out, count: cursor }
 }
