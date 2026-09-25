@@ -228,10 +228,11 @@ BarWidget {
 
       Text {
         id: label
-        // On the glyph's baseline rather than centred: digits have no
-        // descenders, so a centred line box leaves them riding high beside
-        // the icon. The glyph sits centred in the button on its own canvas.
-        y: Math.round((button.height - button.opticalSize) / 2 + button.glyphBaselineY - label.baselineOffset)
+        // Centred the way every text in the bar is, the clock's included, so
+        // all of them sit at one height. Digits have no descenders, so that
+        // leaves them a pixel above the icons' middle, as the rest of the bar's
+        // text is too.
+        anchors.verticalCenter: parent.verticalCenter
         anchors.left: parent.left
         textFormat: Text.PlainText
         text: root.summary ? root.summary.text : ""
