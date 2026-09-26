@@ -104,8 +104,9 @@ function highlightHtml(text, query, color) {
   return out
 }
 
-// The title worth showing, in the order a person would recognize it.
-// A name the tool generated beats the first line that was typed.
+// The title worth showing, in the order a person would recognize it: a
+// name you gave it, then the tool's own, and only then the first line that
+// was typed.
 function titleFrom(raw) {
   return oneLine(raw.customTitle) || oneLine(raw.aiTitle) || oneLine(raw.summary)
     || oneLine(raw.generatedTitle) || oneLine(raw.title) || oneLine(raw.firstUser)

@@ -254,6 +254,26 @@ Item {
     confirm.opened = true
   }
 
+  function askRename(row) {
+    if (!row) return
+    renamer.pending = row
+    renamer.show(row.title)
+  }
+
+  function finishRename() {
+    renamer.opened = false
+    renamer.pending = null
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function saveRename(title) {
+    var row = renamer.pending
+    root.finishRename()
+    if (!row) return
+    renameProc.command = root.scanCommand(["rename", row.tool, row.id, title])
+    renameProc.running = true
+  }
+
   function cancelDelete() {
     confirm.opened = false
     root.pendingDelete = null
@@ -457,6 +477,18 @@ Item {
   }
 
   Process { id: rememberProc }
+
+  Process {
+    id: renameProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var payload = root.parseJson(text)
+        if (payload && payload.ok === true) root.runScan()
+        else root.flash(payload && payload.error ? String(payload.error) : "Could not rename it")
+      }
+    }
+  }
   Process { id: defaultProc }
   Process { id: notifyProc }
 
@@ -542,6 +574,9 @@ Item {
           }
           if (event.key === Qt.Key_Delete) {
             root.askDelete(root.current)
+            event.accepted = true
+          } else if (event.key === Qt.Key_F2) {
+            root.askRename(root.current)
             event.accepted = true
           } else if (event.key === Qt.Key_Escape) {
             if (root.queryText) root.setQuery("")
@@ -921,12 +956,26 @@ Item {
         Text {
           width: parent.width
           textFormat: Text.PlainText
-          text: "enter resumes    shift+enter opens in…    ctrl+enter starts new    del deletes    tab switches tool    esc closes"
+          text: "enter resumes    shift+enter opens in…    ctrl+enter starts new    f2 renames    del deletes    tab switches tool    esc closes"
           color: root.foreground
           opacity: 0.35
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }
+      }
+
+      // F2: name the session.
+      RenameDialog {
+        id: renamer
+        property var pending: null
+        anchors.fill: parent
+        background: root.background
+        foreground: root.foreground
+        selectedText: root.selectedText
+        fontFamily: root.fontFamily
+        cornerRadius: root.cornerRadius
+        onSaved: function(title) { root.saveRename(title) }
+        onCanceled: root.finishRename()
       }
 
       // Shift+Enter: which app a session opens in, remembered for it.

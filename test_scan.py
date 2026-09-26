@@ -435,6 +435,28 @@ class Titles(unittest.TestCase):
         self.assertEqual([named["title"], named["cwd"], named["firstReply"]], ["Project Guidance", "/home/kimm/Work", "Looking now."])
         self.assertEqual([placeholder["title"], placeholder["cwd"]], ["", "/guess"])
 
+    def test_renaming_claude_writes_what_its_own_rename_writes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            project = home / ".claude" / "projects" / "-p"
+            project.mkdir(parents=True)
+            transcript = project / (self.ID + ".jsonl")
+            transcript.write_text(json.dumps({"type": "user", "message": {"content": "pull"}}) + "\n", encoding="utf-8")
+            self.assertTrue(scan.rename_session("claude", self.ID, "Pulled main", home)["ok"])
+            self.assertEqual(scan.claude_raw(transcript)["customTitle"], "Pulled main")
+            scan.rename_session("claude", self.ID, "", home)
+            self.assertEqual(scan.claude_raw(transcript)["customTitle"], "")
+
+    def test_other_tools_keep_their_names_with_the_plugin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "titles.json"
+            scan.rename_session("grok", self.ID, "  Reel   timing ", tmp, path)
+            self.assertEqual(scan.read_titles(path)["names"], {self.ID: "Reel timing"})
+            scan.rename_session("grok", self.ID, "", tmp, path)
+            self.assertEqual(scan.read_titles(path)["names"], {})
+            self.assertFalse(scan.rename_session("grok", "../x", "t", tmp, path)["ok"])
+
+
 
 class CursorAllowance(unittest.TestCase):
     def test_period_usage_matches_the_agent_screen(self):

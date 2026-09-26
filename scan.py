@@ -831,7 +831,67 @@ def collect(home=None):
             sessions.extend(read())
         except Exception as exc:  # one tool being unreadable leaves the others
             warnings.append(f"{name}: {exc}")
+    titles = read_titles(titles_path(home))
+    for raw in sessions:
+        if raw["id"] in titles["names"]:
+            raw["customTitle"] = titles["names"][raw["id"]]
     return {"sessions": sessions, "warnings": warnings}
+
+
+# ---------------------------------------------------------------- titles
+
+def titles_path(home=None):
+    return state_dir(Path(home) if home else home_dir()) / "omarchy" / "sessions" / "titles.json"
+
+
+def read_titles(path):
+    """Names given in the panel, {session id: title}, under `names`."""
+    data = read_json(path)
+    data = data if isinstance(data, dict) else {}
+    out = {}
+    for key in ("names",):
+        entries = data.get(key) if isinstance(data.get(key), dict) else {}
+        out[key] = {str(k): str(v) for k, v in entries.items() if isinstance(v, str) and v}
+    return out
+
+
+def write_titles(titles, path):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_suffix(".tmp")
+    partial.write_text(json.dumps(titles, indent=2, sort_keys=True, ensure_ascii=False), encoding="utf-8")
+    partial.replace(path)
+
+
+def rename_session(tool, session_id, title, home=None, path=None):
+    """Name a session. A Claude session gets the record Claude's own /rename
+    writes, so Claude shows the name too; the other tools have no such place,
+    so the name is kept by the plugin. An empty title takes the name away."""
+    home = Path(home) if home else home_dir()
+    if tool not in ("claude", "grok", "codex", "cursor"):
+        return {"ok": False, "error": "unknown tool"}
+    if not SESSION_ID_RE.fullmatch(str(session_id or "")):
+        return {"ok": False, "error": "not a session id"}
+    title = one_line(title, TITLE_CHARS)
+    if tool == "claude":
+        transcripts = [p for p in session_files("claude", session_id, home) if p.suffix == ".jsonl"]
+        if not transcripts:
+            return {"ok": False, "error": "nothing found for that session"}
+        record = {"type": "custom-title", "customTitle": title, "sessionId": session_id}
+        try:
+            with transcripts[0].open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True}
+    path = path or titles_path(home)
+    titles = read_titles(path)
+    if title:
+        titles["names"][session_id] = title
+    else:
+        titles["names"].pop(session_id, None)
+    write_titles(titles, path)
+    return {"ok": True}
 
 
 CURSOR_CONVERSATION_RE = re.compile(r'"conversationId"\s*:\s*"([^"]+)"')
@@ -1431,6 +1491,8 @@ def main(argv):
         "clients": window_clients,
         "apps": apps_state,
         "open": lambda: open_session(args[0], args[1], args[2], args[3], args[4:]),
+        # rename <tool> <id> <title>  -- an empty title takes the name away
+        "rename": lambda: rename_session(*(args[:3] + ["", "", ""])[:3]),
         # remember <id>=<app> ...
         "remember": lambda: remember_apps(args),
         "set-default": lambda: set_default_app(args[0] if args else ""),

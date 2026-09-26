@@ -26,7 +26,9 @@ The recent sessions on this machine, not the whole history: up to forty Claude t
 | Codex | `~/.codex/state_*.sqlite` | `codex resume <id>` |
 | Cursor | `~/.cursor/projects/<project>/agent-transcripts/` | `agent --resume <id>` |
 
-A generated title is shown when the tool wrote one (Cursor's comes from its chat's `meta.json`, skipping its "New Agent" placeholder). Otherwise the first line you typed. Claude and Cursor name the project folder by replacing slashes, and that name is turned back into a real path by matching it against directories that exist, so `omarchy-notes` stays one folder. The tool's own record of the directory wins when it has one.
+A session shows, in this order: a name you gave it, the title the tool generated (Cursor's comes from its chat's `meta.json`, skipping its "New Agent" placeholder), and only then the first line you typed. Claude and Cursor name the project folder by replacing slashes, and that name is turned back into a real path by matching it against directories that exist, so `omarchy-notes` stays one folder. The tool's own record of the directory wins when it has one.
+
+**Naming sessions.** F2 names the session in hand; an empty name gives it back its own title. A Claude session gets the same record Claude's `/rename` writes, so Claude's `/resume` shows the name too. Grok, Codex and Cursor have nowhere to put one, so their names are kept in `~/.local/state/omarchy/sessions/titles.json`.
 
 At the foot of the panel, a strip of fixed height gives each subscription that has numbers a column, side by side, whichever tool is picked above; the list never moves as the numbers come in. Claude, Codex and Fireworks use the usage records Omarchy writes. Grok's column is the weekly allowance from the same billing figure `/usage` shows, and Cursor's the monthly plan from the same screen as `agent` `/usage`. A subscription with nothing recorded yet is left off the strip. Each allowance that renews gets its own line and meter, with when it renews: a countdown inside a day, the weekday and time inside a week, the date after that. Claude shows its week and, under it, its 5-hour session, so every column opens on its longest allowance. Clicking a column shows only that tool's sessions. Shares inside an allowance (Grok's Build and Chat, Cursor's Auto and API), the last seven days and the split by model are in the bar's popup, described below.
 
@@ -105,6 +107,7 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | Enter | Focus the terminal already running that session, or open it resumed where it was opened last (herdr, tmux or a terminal), else in the default. |
 | Shift+Enter | Choose where it opens: herdr, tmux or Terminal. The choice is remembered for that session; `d` in the chooser makes it the default. |
 | Ctrl+Enter | Start a new conversation with that session's tool, in its folder, in the default app. |
+| F2 | Name that session. Enter saves, Esc cancels; an empty name gives it back its own title. |
 | Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted. |
 | Tab / Shift+Tab | Step to the next or previous chip: All, then each tool, and round again. |
 | Click a chip | Show only that tool's sessions. Click it again for all of them. |
@@ -139,6 +142,7 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 | `Sessions.qml` | The panel: search line, chips and the session list. |
 | `BarWidget.qml` | The bar button, its setting, the five-minute refresh, and the popup's key. |
 | `UsagePanel.qml` | The popup under the bar button. |
+| `RenameDialog.qml` | The F2 dialog: naming a session. |
 | `AppChooser.qml` | The Shift+Enter chooser: which app a session opens in. |
 | `UsageBand.qml` | The fixed-height strip of subscriptions at the foot of the Sessions panel. |
 | `Model.js` | Titles, grouping, search, the resume command, and which window is already that session. |
