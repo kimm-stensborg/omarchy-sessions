@@ -2,11 +2,11 @@
 
 A summoned overlay that lists the conversations you already have going, grouped by the folder they belong to, and puts you back in the one you pick.
 
-Claude, Grok, Codex and Cursor, newest first. Type to narrow. A chip limits the list to one tool. Enter brings that conversation forward: a terminal already running it is focused, and if there isn't one, your terminal opens resumed in that folder.
+Claude, Grok, Codex and Cursor, newest first. Type to narrow. Three pills under the search line narrow it further: to one tool, to what is running, to one workspace. Enter brings that conversation forward: a terminal already running it is focused, and if there isn't one, your terminal opens resumed in that folder.
 
 The panel keeps a title, the folder and how long ago. The transcript stays in the tool.
 
-Each folder gets a header with how many sessions are under it. A dot in front of a session means a window is already running it, so Enter will bring that window forward rather than open another. Each tool has its own colour, taken from the theme, on its chip and beside its name in the list. While you type, the words that matched light up in titles and folder names. An allowance turns amber at three quarters used and red at 90%.
+Each folder gets a header with how many sessions are under it. A dot in front of a session means a window is already running it, so Enter will bring that window forward rather than open another. Each tool has its own colour, taken from the theme, on the tool pill and beside its name in the list. While you type, the words that matched light up in titles and folder names. An allowance turns amber at three quarters used and red at 90%.
 
 A session counts as already running in a window when its id turns up anywhere inside that window: on the command line of the terminal or of anything started in it, including panes of a multiplexer, in a file one of those processes has open, or in what the tool records for that process. Claude writes one to `~/.claude/sessions/<pid>.json` and Grok to `~/.grok/active_sessions.json`. Cursor's `agent` names its conversation in the log it keeps open. Codex is recognized when it was started with `codex resume <id>`. A terminal running as a server, one process behind several windows, can't be told apart per window, so only its own command line counts. When the session runs in a [herdr](https://herdr.dev) pane, that pane is brought forward too, not just the window holding it.
 
@@ -34,11 +34,19 @@ A session shows, in this order: a name you gave it, the title the tool generated
 
 At the foot of the panel, a strip of fixed height gives each subscription that has numbers a column, side by side, whichever tool is picked above; the list never moves as the numbers come in. Claude, Codex and Fireworks use the usage records Omarchy writes. Grok's column is the weekly allowance from the same billing figure `/usage` shows, and Cursor's the monthly plan from the same screen as `agent` `/usage`. A subscription with nothing recorded yet is left off the strip. Each allowance that renews gets its own line and meter, with when it renews: a countdown inside a day, the weekday and time inside a week, the date after that. Claude shows its week and, under it, its 5-hour session, so every column opens on its longest allowance. Clicking a column shows only that tool's sessions. Shares inside an allowance (Grok's Build and Chat, Cursor's Auto and API), the last seven days and the split by model are in the bar's popup, described below.
 
-## Starting a session, and one workspace at a time
+## Starting a session
 
 Ctrl+Enter asks for a tool and a workspace, then starts a new conversation there in the default app. It starts on the tool and folder of the session in hand; the tools offered are the installed ones (`claude`, `grok`, `codex`, and `agent` for Cursor). The workspaces are every folder a session was held in, newest first, with a dot for each tool used there. Typing narrows them by name and path, every word has to match; the arrows move through them, ←/→ or Tab switch tool, Enter starts, and Esc clears what was typed, then cancels. A workspace that isn't there yet is made by typing it: what was typed is offered last as "+ new", a plain name in the folder most of your workspaces sit in (typically `~/Projects`), a path starting with `~` or `/` as it is. Its folder is made when the session starts, and herdr gives it a workspace of its own.
 
-The pill at the right of the chips says which workspace the list shows, "All workspaces" to begin with. Clicking it, or Ctrl+W, opens the same list to pick one: only its sessions show then, and the pill names it, with a × to let go. Clicking a folder's header does the same, and clicking it again lets go; so do the × and "All workspaces" at the top of the list. It combines with the tool chips and with typing. The **Running** chip after the tools (or Ctrl+R) likewise shows only the sessions already running, those with a dot, background sessions included, and combines with all of these. The tool, workspace and running filters are kept between launches, in `~/.local/state/omarchy/sessions/filters.json`, and come back the next time the panel opens.
+## The pills
+
+Three pills under the search line narrow the list, and each says what it shows. Tab walks them from left to right and back to the list (Shift+Tab the other way); Enter on the one in hand opens or switches it, and Esc goes back to the list. They combine with each other and with typing.
+
+- **Tools**: "All tools" to begin with. Enter, a click or Ctrl+T drops the list of tools that have sessions; pick one and only its sessions show, with its colour on the pill. Clicking a subscription at the foot of the panel shows that tool too.
+- **Running**: only the sessions already running, those with a dot, background sessions included. Enter, a click or Ctrl+R switches it.
+- **Workspaces**, at the right: "All workspaces" to begin with. Enter, a click or Ctrl+W opens the same list as for a new session, to pick one: only its sessions show, and the pill names it, with a × to let go. Clicking a folder's header does the same, and clicking it again lets go; so does "All workspaces" at the top of the list.
+
+The tool, workspace and running filters are kept between launches, in `~/.local/state/omarchy/sessions/filters.json`, and come back the next time the panel opens.
 
 ## Where sessions open
 
@@ -118,12 +126,12 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | Shift+Enter | Choose where it opens: herdr, tmux or Terminal. The choice is remembered for that session; `d` in the chooser makes it the default. |
 | Ctrl+Enter | Start a new conversation: pick the tool and the workspace, those of the session in hand to start with, or type a new workspace's name. It opens in the default app. |
 | Ctrl+W | Show only one workspace's sessions, picked from a list you can type to narrow. Same as clicking the workspace pill. |
-| Ctrl+R | Show only the running sessions, or all of them again. Same as the Running chip. |
+| Ctrl+R | Show only the running sessions, or all of them again. Same as the Running pill. |
+| Ctrl+T | Pick the tool whose sessions show, or all tools. Same as the tool pill. |
 | F2 | Name that session. Enter saves, Esc cancels; an empty name gives it back its own title. |
 | Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted. |
-| Tab / Shift+Tab | Step to the next or previous chip: All, then each tool, and round again. |
-| Click a chip | Show only that tool's sessions. Click it again for all of them. |
-| Click a subscription at the foot | Same as its chip. |
+| Tab / Shift+Tab | Move along the pills (tools, running, workspace) and back to the list. Enter opens or switches the one in hand, Esc goes back to the list. |
+| Click a subscription at the foot | Show only that tool's sessions. |
 | Click a folder header | Show only that folder's sessions. Click it again for all of them. |
 | Esc | Clear the line, or close the panel when the line is empty. The filters stay. |
 | Ctrl+? (or F1) | Every shortcut on one sheet. The foot of the panel shows only the few for the session in hand. |
@@ -154,7 +162,8 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 
 | File | Owns |
 |------|------|
-| `Sessions.qml` | The panel: search line, chips and the session list. |
+| `Sessions.qml` | The panel: search line, pills and the session list. |
+| `ToolMenu.qml` | The tool pill's list of tools. |
 | `BarWidget.qml` | The bar button, its setting, the five-minute refresh, and the popup's key. |
 | `UsagePanel.qml` | The popup under the bar button. |
 | `RenameDialog.qml` | The F2 dialog: naming a session. |

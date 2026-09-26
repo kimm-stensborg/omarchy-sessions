@@ -315,7 +315,9 @@ var SHORTCUTS = [
     ["Esc", "Clear the search, then close"]
   ] },
   { group: "Filters", keys: [
-    ["Tab", "Next tool, Shift+Tab back"],
+    ["Tab", "Move along the pills and back"],
+    ["Enter", "Open or switch the pill"],
+    ["Ctrl+T", "Pick a tool"],
     ["Ctrl+W", "Pick a workspace"],
     ["Ctrl+R", "Only running sessions"],
     ["Click header", "Only that workspace"]
@@ -327,7 +329,10 @@ var SHORTCUTS = [
 
 // The few keys worth showing at the foot for what is in hand; the rest are
 // on the Ctrl+? sheet.
-function footerHints(row, query) {
+// `pill` is the header pill in hand (0 tool, 1 running, 2 workspace), or -1.
+function footerHints(row, query, pill) {
+  if (pill === 0 || pill === 2) return [["enter", "opens"], ["tab", "next"], ["esc", "back to the list"]]
+  if (pill === 1) return [["enter", "switches"], ["tab", "next"], ["esc", "back to the list"]]
   var hints = []
   if (str(query)) hints.push(["esc", "clears"])
   if (row && row.running) hints.push(["enter", "focuses"])
@@ -436,6 +441,18 @@ function newTools(apps, sessions) {
     if (installed.indexOf(TOOLS[i]) !== -1) out.push({ id: TOOLS[i], label: toolLabel(TOOLS[i]) })
   }
   return out
+}
+
+// Tab walks the three header pills and back to the list: -1 is the list,
+// 0 the tool pill, 1 running, 2 the workspace pill.
+function nextPill(current, delta) {
+  var at = typeof current === "number" && current >= -1 && current <= 2 ? current + 1 : 0
+  return ((at + delta) % 4 + 4) % 4 - 1
+}
+
+// The tool pill's list: all tools first, then each tool that has sessions.
+function toolMenu(sessions) {
+  return [{ id: "", label: "All tools" }].concat(toolsPresent(sessions))
 }
 
 // The chip `delta` steps from the current one, round the ends, so Tab and

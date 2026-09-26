@@ -348,6 +348,10 @@ check("and focusing a running one, with esc while searching", M.footerHints({ ru
 check("with nothing in hand, only new and the sheet", M.footerHints(null, "").map(h => h[0]), ["ctrl+enter", "ctrl+?"])
 check("the sheet lists every group", M.SHORTCUTS.map(g => g.group), ["Sessions", "Find", "Filters", "Help"])
 
+check("tab walks the pills and back to the list", [M.nextPill(-1, 1), M.nextPill(2, 1), M.nextPill(-1, -1), M.nextPill(0, -1)], [0, -1, 2, -1])
+check("the tool pill lists all tools, then those with sessions", M.toolMenu(spots).map(t => t.label), ["All tools", "Claude", "Grok", "Codex"])
+check("on a pill the foot says what enter does there", M.footerHints({ running: false }, "", 1).map(h => h.join(" ")), ["enter switches", "tab next", "esc back to the list"])
+
 if (failures.length) {
   console.log(failures.join("\n"))
   console.log(failures.length + " failed, " + (checks - failures.length) + " ok")

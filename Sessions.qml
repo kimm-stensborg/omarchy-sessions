@@ -6,7 +6,7 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Sessions. One search line, a chip per tool that actually has something,
+// Sessions. One search line, three pills to narrow it (tool, running, workspace),
 // and the recent conversations grouped by the folder they belong to.
 // Enter goes back to the one in hand: a terminal already running it comes
 // forward, otherwise a new terminal resumes it.
@@ -28,8 +28,11 @@ Item {
   property string tool: ""
   // The one folder the list is narrowed to, or "" for all of them.
   property string folder: ""
-  // Only the sessions already running, toggled with Ctrl+R or its chip.
+  // Only the sessions already running, toggled with Ctrl+R or its pill.
   property bool runningOnly: false
+  // The header pill Tab has put in hand: 0 tools, 1 running, 2 workspace;
+  // -1 is the list.
+  property int pill: -1
   property int selected: 0
   property var sessions: []
   property var viewRows: []
@@ -93,6 +96,7 @@ Item {
     root.tool = filters.tool
     root.folder = filters.folder
     root.runningOnly = filters.running
+    root.pill = -1
     root.selected = 0
     root.statusMessage = ""
     root.sessions = []
@@ -115,6 +119,7 @@ Item {
 
   function close() {
     root.opened = false
+    toolMenu.opened = false
     picker.opened = false
     sheet.opened = false
     scanProc.running = false
@@ -225,13 +230,14 @@ Item {
   }
 
   function setQuery(next) {
+    root.pill = -1
     root.queryText = next
     root.selected = 0
     pointerGate.reset()
     root.refresh()
   }
 
-  // A click on the chip already picked goes back to all of them.
+  // A click on the subscription already shown goes back to all tools.
   function setTool(id) {
     root.showTool(root.tool === id ? "" : id)
   }
@@ -354,6 +360,25 @@ Item {
     picker.opened = false
     if (!argv) return
     root.openIn(root.apps.default, { cwd: cwd, title: Model.toolLabel(tool), create: create }, argv, false)
+  }
+
+  // Ctrl+T or the tool pill: which tool's sessions show, from a list
+  // dropped under the pill.
+  function chooseTool() {
+    var at = toolPill.mapToItem(card, 0, toolPill.height + Style.space(4))
+    toolMenu.show(Model.toolMenu(root.sessions), root.tool, at.x, at.y)
+  }
+
+  // Enter on the pill in hand.
+  function usePill(which) {
+    if (which === 0) root.chooseTool()
+    else if (which === 1) root.showRunning(!root.runningOnly)
+    else if (which === 2) root.chooseFolder()
+  }
+
+  function pillBorder(on, which) {
+    if (root.pill === which) return root.accent
+    return on ? Util.alpha(root.accent, 0.55) : Util.alpha(root.borderColor, 0.28)
   }
 
   // Ctrl+W: which folder the list shows, the one in hand to start with.
@@ -679,6 +704,11 @@ Item {
             event.accepted = true
             return
           }
+          if (toolMenu.opened) {
+            toolMenu.handleKey(event)
+            event.accepted = true
+            return
+          }
           if (picker.opened) {
             picker.handleKey(event)
             event.accepted = true
@@ -708,17 +738,23 @@ Item {
                      && (event.key === Qt.Key_Question || event.key === Qt.Key_Slash))) {
             sheet.opened = true
             event.accepted = true
+          } else if (event.key === Qt.Key_T && (event.modifiers & Qt.ControlModifier)) {
+            root.chooseTool()
+            event.accepted = true
           } else if (event.key === Qt.Key_W && (event.modifiers & Qt.ControlModifier)) {
             root.chooseFolder()
             event.accepted = true
           } else if (event.key === Qt.Key_Escape) {
             // The filters stay: they are kept for next time.
-            if (root.queryText) root.setQuery("")
+            if (root.pill >= 0) root.pill = -1
+            else if (root.queryText) root.setQuery("")
             else root.close()
             event.accepted = true
           } else if (event.key === Qt.Key_Up) {
+            root.pill = -1
             root.move(-1); event.accepted = true
           } else if (event.key === Qt.Key_Down) {
+            root.pill = -1
             root.move(1); event.accepted = true
           } else if (event.key === Qt.Key_PageUp) {
             root.selectAbsolute(root.selected - 6); event.accepted = true
@@ -730,10 +766,11 @@ Item {
             root.selectAbsolute(root.count - 1); event.accepted = true
           } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
             var back = event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier)
-            root.showTool(Model.nextTool(root.chips, root.tool, back ? -1 : 1))
+            root.pill = Model.nextPill(root.pill, back ? -1 : 1)
             event.accepted = true
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            if (event.modifiers & Qt.ControlModifier) root.startNew(root.current)
+            if (root.pill >= 0 && !(event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier))) root.usePill(root.pill)
+            else if (event.modifiers & Qt.ControlModifier) root.startNew(root.current)
             else if (event.modifiers & Qt.ShiftModifier) root.chooseApp(root.current)
             else root.resume(root.current)
             event.accepted = true
@@ -831,58 +868,48 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(6)
 
-            Repeater {
-              model: root.chips.length
+            // The tool shown, "All tools" or one: a click, Ctrl+T or Enter on
+            // it drops the list of tools.
+            Rectangle {
+              id: toolPill
+              radius: root.cornerRadius
+              height: Math.max(Style.space(20), Style.font.caption + Style.space(8))
+              width: toolLabel.implicitWidth + Style.space(18) + (toolMark.visible ? toolMark.width + Style.space(6) : 0)
+              color: root.tool ? root.selectedBackground : "transparent"
+              border.width: root.pill === 0 ? Math.max(2, Style.space(2)) : Style.normalBorderWidth
+              border.color: root.pillBorder(root.tool !== "", 0)
 
-              delegate: Rectangle {
-                id: chip
-                required property int index
-                readonly property var entry: root.chips[index]
-                readonly property bool active: entry && root.tool === entry.id
+              Rectangle {
+                id: toolMark
+                visible: root.tool !== ""
+                width: Style.space(6)
+                height: width
+                radius: width / 2
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(9)
+                anchors.verticalCenter: parent.verticalCenter
+                color: Model.toolColor(root.tool, root.themeColors, root.accent)
+              }
 
-                radius: root.cornerRadius
-                height: Math.max(Style.space(20), Style.font.caption + Style.space(8))
-                width: chipLabel.implicitWidth + Style.space(18) + (chipMark.visible ? chipMark.width + Style.space(6) : 0)
-                color: chip.active ? root.selectedBackground : "transparent"
-                border.width: Style.normalBorderWidth
-                border.color: chip.active ? Util.alpha(root.accent, 0.55) : Util.alpha(root.borderColor, 0.28)
+              Text {
+                id: toolLabel
+                textFormat: Text.PlainText
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: toolMark.visible ? toolMark.right : parent.left
+                anchors.leftMargin: toolMark.visible ? Style.space(6) : Style.space(9)
+                text: (root.tool ? Model.toolLabel(root.tool) : "All tools") + "  ▾"
+                color: root.tool ? root.selectedText : root.foreground
+                opacity: root.tool ? 1 : 0.55
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
 
-                Rectangle {
-                  id: chipMark
-                  visible: chip.entry && chip.entry.id !== ""
-                  width: Style.space(6)
-                  height: width
-                  radius: width / 2
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.space(9)
-                  anchors.verticalCenter: parent.verticalCenter
-                  color: chip.entry ? Model.toolColor(chip.entry.id, root.themeColors, root.accent) : "transparent"
-                }
-
-                Text {
-                  id: chipLabel
-                  textFormat: Text.PlainText
-                  anchors.verticalCenter: parent.verticalCenter
-                  anchors.left: chipMark.visible ? chipMark.right : parent.left
-                  anchors.leftMargin: chipMark.visible ? Style.space(6) : Style.space(9)
-                  text: chip.entry ? chip.entry.label : ""
-                  color: chip.active ? root.selectedText : root.foreground
-                  opacity: chip.active ? 1 : 0.55
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
-
-                MouseArea {
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: if (chip.entry) root.setTool(chip.entry.id)
-                }
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.chooseTool()
               }
             }
-
-            // Only what is running: a chip of its own, apart from the tools.
-            Item { width: Style.space(8); height: 1 }
 
             Rectangle {
               id: runningChip
@@ -890,8 +917,8 @@ Item {
               height: Math.max(Style.space(20), Style.font.caption + Style.space(8))
               width: runningLabel.implicitWidth + runningMark.width + Style.space(24)
               color: root.runningOnly ? root.selectedBackground : "transparent"
-              border.width: Style.normalBorderWidth
-              border.color: root.runningOnly ? Util.alpha(root.accent, 0.55) : Util.alpha(root.borderColor, 0.28)
+              border.width: root.pill === 1 ? Math.max(2, Style.space(2)) : Style.normalBorderWidth
+              border.color: root.pillBorder(root.runningOnly, 1)
 
               Rectangle {
                 id: runningMark
@@ -935,8 +962,8 @@ Item {
             height: Math.max(Style.space(20), Style.font.caption + Style.space(8))
             width: folderLabel.implicitWidth + Style.space(18) + (folderClear.visible ? folderClear.width + Style.space(8) : 0)
             color: root.folder ? root.selectedBackground : "transparent"
-            border.width: Style.normalBorderWidth
-            border.color: root.folder ? Util.alpha(root.accent, 0.55) : Util.alpha(root.borderColor, 0.28)
+            border.width: root.pill === 2 ? Math.max(2, Style.space(2)) : Style.normalBorderWidth
+            border.color: root.pillBorder(root.folder !== "", 2)
 
             Text {
               id: folderLabel
@@ -944,7 +971,7 @@ Item {
               anchors.leftMargin: Style.space(9)
               anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
-              text: root.folder ? Model.projectLabel(root.folder, root.home) : "All workspaces"
+              text: root.folder ? Model.projectLabel(root.folder, root.home) : "All workspaces  ▾"
               color: root.folder ? root.selectedText : root.foreground
               opacity: root.folder ? 1 : 0.55
               font.family: root.fontFamily
@@ -1072,7 +1099,7 @@ Item {
 
               Item {
                 id: rowTool
-                // Picking a tool's chip makes the column say the same thing on every row.
+                // Picking a tool makes the column say the same thing on every row.
                 visible: !sessionRow.header && root.tool === ""
                 anchors.right: rowWhen.left
                 anchors.rightMargin: Style.space(14)
@@ -1205,7 +1232,7 @@ Item {
           spacing: Style.space(18)
 
           Repeater {
-            model: Model.footerHints(root.current, root.queryText)
+            model: Model.footerHints(root.current, root.queryText, root.pill)
 
             Row {
               required property var modelData
@@ -1232,6 +1259,25 @@ Item {
             }
           }
         }
+      }
+
+      // Ctrl+T: the tool pill's list.
+      ToolMenu {
+        id: toolMenu
+        anchors.fill: parent
+        themeColors: root.themeColors
+        background: root.background
+        foreground: root.foreground
+        selectedBackground: root.selectedBackground
+        selectedText: root.selectedText
+        accent: root.accent
+        fontFamily: root.fontFamily
+        cornerRadius: root.cornerRadius
+        onPicked: function(id) {
+          toolMenu.opened = false
+          root.showTool(id)
+        }
+        onCanceled: toolMenu.opened = false
       }
 
       // Ctrl+?: every key.
