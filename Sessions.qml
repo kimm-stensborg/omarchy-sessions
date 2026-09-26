@@ -116,6 +116,7 @@ Item {
   function close() {
     root.opened = false
     picker.opened = false
+    sheet.opened = false
     scanProc.running = false
     usageProc.running = false
     clientProc.running = false
@@ -355,7 +356,7 @@ Item {
     root.openIn(root.apps.default, { cwd: cwd, title: Model.toolLabel(tool), create: create }, argv, false)
   }
 
-  // Ctrl+F: which folder the list shows, the one in hand to start with.
+  // Ctrl+W: which folder the list shows, the one in hand to start with.
   function chooseFolder() {
     var cwd = root.folder || (root.current ? root.current.cwd : "")
     picker.show("filter", Model.workspaces(root.sessions, root.home), cwd, [], "")
@@ -673,6 +674,11 @@ Item {
             event.accepted = true
             return
           }
+          if (sheet.opened) {
+            sheet.handleKey(event)
+            event.accepted = true
+            return
+          }
           if (picker.opened) {
             picker.handleKey(event)
             event.accepted = true
@@ -698,7 +704,11 @@ Item {
           } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
             root.showRunning(!root.runningOnly)
             event.accepted = true
-          } else if (event.key === Qt.Key_F && (event.modifiers & Qt.ControlModifier)) {
+          } else if (event.key === Qt.Key_F1 || ((event.modifiers & Qt.ControlModifier)
+                     && (event.key === Qt.Key_Question || event.key === Qt.Key_Slash))) {
+            sheet.opened = true
+            event.accepted = true
+          } else if (event.key === Qt.Key_W && (event.modifiers & Qt.ControlModifier)) {
             root.chooseFolder()
             event.accepted = true
           } else if (event.key === Qt.Key_Escape) {
@@ -915,25 +925,28 @@ Item {
             }
           }
 
-          // The workspace the list is narrowed to; a click (or Esc) lets go.
+          // The workspace shown, "All workspaces" or one: a click (or Ctrl+W)
+          // picks another, the × lets go of one.
           Rectangle {
             id: folderChip
-            visible: root.folder !== ""
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             radius: root.cornerRadius
             height: Math.max(Style.space(20), Style.font.caption + Style.space(8))
-            width: folderLabel.implicitWidth + Style.space(18)
-            color: root.selectedBackground
+            width: folderLabel.implicitWidth + Style.space(18) + (folderClear.visible ? folderClear.width + Style.space(8) : 0)
+            color: root.folder ? root.selectedBackground : "transparent"
             border.width: Style.normalBorderWidth
-            border.color: Util.alpha(root.accent, 0.55)
+            border.color: root.folder ? Util.alpha(root.accent, 0.55) : Util.alpha(root.borderColor, 0.28)
 
             Text {
               id: folderLabel
-              anchors.centerIn: parent
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(9)
+              anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
-              text: "in " + Model.projectLabel(root.folder, root.home) + "  ×"
-              color: root.selectedText
+              text: root.folder ? Model.projectLabel(root.folder, root.home) : "All workspaces"
+              color: root.folder ? root.selectedText : root.foreground
+              opacity: root.folder ? 1 : 0.55
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
             }
@@ -941,7 +954,27 @@ Item {
             MouseArea {
               anchors.fill: parent
               cursorShape: Qt.PointingHandCursor
-              onClicked: root.showFolder("")
+              onClicked: root.chooseFolder()
+            }
+
+            Text {
+              id: folderClear
+              visible: root.folder !== ""
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(9)
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: "×"
+              color: root.selectedText
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+
+              MouseArea {
+                anchors.fill: parent
+                anchors.margins: -Style.space(6)
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.showFolder("")
+              }
             }
           }
         }
@@ -1165,15 +1198,52 @@ Item {
           onPicked: function(id) { root.setTool(id) }
         }
 
-        Text {
+        // Only the keys for what is in hand; Ctrl+? has them all.
+        Row {
           width: parent.width
-          textFormat: Text.PlainText
-          text: "enter resumes    shift+enter opens in…    ctrl+enter new    ctrl+f workspace    ctrl+r running    f2 renames    del deletes    tab tool    esc closes"
-          color: root.foreground
-          opacity: 0.35
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          height: root.footerHeight
+          spacing: Style.space(18)
+
+          Repeater {
+            model: Model.footerHints(root.current, root.queryText)
+
+            Row {
+              required property var modelData
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(6)
+
+              Text {
+                textFormat: Text.PlainText
+                text: modelData[0]
+                color: root.foreground
+                opacity: 0.75
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Text {
+                textFormat: Text.PlainText
+                text: modelData[1]
+                color: root.foreground
+                opacity: 0.4
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+          }
         }
+      }
+
+      // Ctrl+?: every key.
+      ShortcutsSheet {
+        id: sheet
+        anchors.fill: parent
+        background: root.background
+        foreground: root.foreground
+        selectedText: root.selectedText
+        fontFamily: root.fontFamily
+        cornerRadius: root.cornerRadius
+        onClosed: sheet.opened = false
       }
 
       // F2: name the session.
@@ -1190,7 +1260,7 @@ Item {
         onCanceled: root.finishRename()
       }
 
-      // Ctrl+Enter: the tool and workspace of a new session. Ctrl+F: the
+      // Ctrl+Enter: the tool and workspace of a new session. Ctrl+W: the
       // workspace the list shows.
       WorkspacePicker {
         id: picker

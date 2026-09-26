@@ -298,6 +298,44 @@ function openingFilters(payload, saved) {
   }
 }
 
+// Every key the panel knows, for the Ctrl+? sheet, in groups.
+var SHORTCUTS = [
+  { group: "Sessions", keys: [
+    ["Enter", "Resume, or focus if running"],
+    ["Shift+Enter", "Choose where it opens"],
+    ["Ctrl+Enter", "New session, tool and workspace"],
+    ["F2", "Name the session"],
+    ["Del", "Delete the session"]
+  ] },
+  { group: "Find", keys: [
+    ["Type", "Narrow the list"],
+    ["↑ ↓", "Move, newest to oldest"],
+    ["PgUp PgDn", "Move a page"],
+    ["Home End", "Newest, oldest"],
+    ["Esc", "Clear the search, then close"]
+  ] },
+  { group: "Filters", keys: [
+    ["Tab", "Next tool, Shift+Tab back"],
+    ["Ctrl+W", "Pick a workspace"],
+    ["Ctrl+R", "Only running sessions"],
+    ["Click header", "Only that workspace"]
+  ] },
+  { group: "Help", keys: [
+    ["Ctrl+?", "This sheet"]
+  ] }
+]
+
+// The few keys worth showing at the foot for what is in hand; the rest are
+// on the Ctrl+? sheet.
+function footerHints(row, query) {
+  var hints = []
+  if (str(query)) hints.push(["esc", "clears"])
+  if (row && row.running) hints.push(["enter", "focuses"])
+  else if (row) hints.push(["enter", "resumes"], ["shift+enter", "opens in…"])
+  hints.push(["ctrl+enter", "new"], ["ctrl+?", "all shortcuts"])
+  return hints
+}
+
 // Every folder a session was held in, newest first, once each: the
 // workspaces a new session can start in and the list can be narrowed to.
 // Named as the headers name them; `path` is the folder with ~ for home.

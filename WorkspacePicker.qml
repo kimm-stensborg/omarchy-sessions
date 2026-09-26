@@ -12,7 +12,7 @@ import "Model.js" as Model
 //             ← / → / Tab   tool     ↑ / ↓   workspace     Enter   start
 //             A name or path that isn't listed is offered last, as a new
 //             workspace: the folder is made when the session starts.
-//   "filter"  Ctrl+F: the one workspace the list shows, or all of them
+//   "filter"  Ctrl+W: the one workspace the list shows, or all of them
 //             ↑ / ↓   workspace     Enter   show it
 //
 //   Esc clears what was typed, then cancels.

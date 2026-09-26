@@ -342,6 +342,12 @@ check("a broken file keeps nothing", M.savedFilters("{nope"), { tool: "", folder
 check("what the panel is opened with wins over what was kept",
   M.openingFilters({ tool: "" }, { tool: "grok", folder: "/p/x", running: true }), { tool: "", folder: "/p/x", running: true })
 
+check("the foot offers resuming a session at rest", M.footerHints({ running: false }, "").map(h => h[0]), ["enter", "shift+enter", "ctrl+enter", "ctrl+?"])
+check("and focusing a running one, with esc while searching", M.footerHints({ running: true }, "x").map(h => h.join(" ")),
+  ["esc clears", "enter focuses", "ctrl+enter new", "ctrl+? all shortcuts"])
+check("with nothing in hand, only new and the sheet", M.footerHints(null, "").map(h => h[0]), ["ctrl+enter", "ctrl+?"])
+check("the sheet lists every group", M.SHORTCUTS.map(g => g.group), ["Sessions", "Find", "Filters", "Help"])
+
 if (failures.length) {
   console.log(failures.join("\n"))
   console.log(failures.length + " failed, " + (checks - failures.length) + " ok")
