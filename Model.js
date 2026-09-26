@@ -199,8 +199,12 @@ function relativeTime(updated, now) {
 // what the keyboard moves through. `running` marks the ids a window already has.
 // `folder`, when given, keeps only the sessions of that one folder, and
 // `onlyRunning` only those already running.
-// `states` says how each running agent is doing (see agentState).
-function rows(sessions, query, tool, now, home, running, folder, onlyRunning, states) {
+// `states` says how each running agent is doing (see agentState). Pinned
+// sessions (`pins`, a list of ids) come first under a "Pinned" header of
+// their own, and not again under their folder.
+var PINNED = "\u0000pinned"
+
+function rows(sessions, query, tool, now, home, running, folder, onlyRunning, states, pins) {
   var wanted = str(tool).trim()
   var inFolder = str(folder).trim()
   var groups = []
@@ -213,10 +217,11 @@ function rows(sessions, query, tool, now, home, running, folder, onlyRunning, st
     if (onlyRunning && !(running && running[source[i].id])) continue
     if (!matches(source[i], query)) continue
     matched.push(source[i])
-    var key = source[i].key
+    var key = pins && pins.indexOf(source[i].id) !== -1 ? PINNED : source[i].key
     if (!groupOf[key]) {
       groupOf[key] = []
-      groups.push(key)
+      if (key === PINNED) groups.unshift(key)
+      else groups.push(key)
     }
     groupOf[key].push(source[i])
   }
@@ -225,8 +230,9 @@ function rows(sessions, query, tool, now, home, running, folder, onlyRunning, st
   var cursor = 0
   for (var g = 0; g < groups.length; g++) {
     var members = groupOf[groups[g]]
-    var label = labels[groups[g]] || members[0].project
-    out.push({ kind: "header", project: label, cwd: members[0].cwd, count: members.length })
+    var pinned = groups[g] === PINNED
+    var label = pinned ? "Pinned" : labels[groups[g]] || members[0].project
+    out.push({ kind: "header", project: label, cwd: pinned ? "" : members[0].cwd, count: members.length, pinned: pinned })
     for (var m = 0; m < members.length; m++) {
       var session = members[m]
       out.push({
@@ -237,7 +243,8 @@ function rows(sessions, query, tool, now, home, running, folder, onlyRunning, st
         id: session.id,
         cwd: session.cwd,
         title: session.title,
-        project: label,
+        project: pinned ? labels[session.key] || session.project : label,
+        pinned: pinned,
         when: relativeTime(session.updated, now),
         running: !!(running && running[session.id]),
         state: (states && states[session.id]) || ""
@@ -307,6 +314,7 @@ var SHORTCUTS = [
     ["Shift+Enter", "Choose where it opens"],
     ["Ctrl+Enter", "New session, tool and workspace"],
     ["→ ←", "Peek at the last messages, hide"],
+    ["Ctrl+P", "Pin to the top, unpin"],
     ["F2", "Name the session"],
     ["Del", "Delete the session"]
   ] },
@@ -453,6 +461,30 @@ function newTools(apps, sessions) {
 function nextPill(current, delta) {
   var at = typeof current === "number" && current >= -1 && current <= 2 ? current + 1 : 0
   return ((at + delta) % 4 + 4) % 4 - 1
+}
+
+// Pins after pinning or unpinning `id`: a pinned one comes first.
+function togglePin(pins, id) {
+  var list = (pins || []).filter(function(pin) { return pin !== id })
+  if (list.length === (pins || []).length) list.unshift(id)
+  return list
+}
+
+// The pins kept in pins.json: session ids, nothing else.
+function savedPins(text) {
+  var data = null
+  try { data = JSON.parse(str(text) || "{}") } catch (error) { data = null }
+  var ids = data && Array.isArray(data.pins) ? data.pins : []
+  return ids.filter(function(id) { return typeof id === "string" && /^[0-9A-Za-z][0-9A-Za-z_-]{7,127}$/.test(id) })
+}
+
+// Where a session is in the list, by id: its cursor, or -1.
+function cursorOf(viewRows, id) {
+  var list = viewRows || []
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].kind === "session" && list[i].id === id) return list[i].cursor
+  }
+  return -1
 }
 
 // The tool pill's list: all tools first, then each tool that has sessions.

@@ -360,6 +360,13 @@ check("only running sessions get a state", M.agentStates([{ id: "a" }, { id: "b"
 check("rows carry the state", M.rows(spots, "", "", NOW, HOME, { c: true }, "", false, { c: "working" }).rows.filter(r => r.id === "c")[0].state, "working")
 check("a state reads as words", [M.stateLabel("working"), M.stateLabel("yours"), M.stateLabel("asking"), M.stateLabel("")], ["working…", "your turn", "needs you", ""])
 
+const pinnedRows = M.rows(spots, "", "", NOW, HOME, {}, "", false, {}, ["d", "c"]).rows
+check("pinned sessions come first under their own header, not again below", pinnedRows.map(r => r.kind === "header" ? "#" + r.project : r.id),
+  ["#Pinned", "c", "d", "#Projects/casino", "a", "#work/casino", "b", "#e", "e"])
+check("a pinned row still names its folder", pinnedRows.filter(r => r.id === "d")[0].project, "Home")
+check("pinning puts it first, again takes it off", [M.togglePin(["a"], "b"), M.togglePin(["a", "b"], "a")], [["b", "a"], ["b"]])
+check("kept pins are ids only", M.savedPins('{"pins":["aaaaaaaa-1", "../x", 5]}'), ["aaaaaaaa-1"])
+check("a session is found again by id", [M.cursorOf(pinnedRows, "a"), M.cursorOf(pinnedRows, "zz")], [2, -1])
 check("the foot says how to hide the peek", M.footerHints({ running: false }, "", -1, true).map(h => h[0]), ["enter", "shift+enter", "←", "ctrl+enter", "ctrl+?"])
 
 if (failures.length) {

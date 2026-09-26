@@ -58,9 +58,11 @@ A session that is not running opens in **herdr**, **tmux** or a plain **Terminal
 
 A Claude session running in the background (one Claude parked as a background job) counts as running but has no window of its own: Enter opens it with `claude attach` in its app, as Claude requires, rather than `--resume`, which Claude refuses for a running session. A session found running in a herdr or tmux pane is remembered there as well, so one started by hand opens there again next time. Sessions in tmux are brought forward in their pane, as herdr's are. Both are found through the terminal showing them, so a herdr server that has outlived the terminal that started it still counts. What is remembered lives in `~/.local/state/omarchy/sessions/apps.json`.
 
-## Peeking
+## Peeking and pinning
 
 → opens a pane beside the list with the last few things said in the session in hand: what you wrote and what the agent answered, without tool calls, newest at the bottom. It follows the selection as you move, and ← hides it. Only the tail of the transcript is read, so a long session opens as fast as a short one; a session whose last stretch is all tool work shows only the agent's words.
+
+Ctrl+P pins the session in hand: it moves to a **Pinned** group at the top of the list, with its folder named beside it, and stays there between launches. Ctrl+P on it again puts it back in its folder. Pins live in `~/.local/state/omarchy/sessions/pins.json`.
 
 ## Deleting a session
 
@@ -133,6 +135,7 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | Ctrl+R | Show only the running sessions, or all of them again. Same as the Running pill. |
 | Ctrl+T | Pick the tool whose sessions show, or all tools. Same as the tool pill. |
 | → / ← | Show the last messages of that session beside the list, or hide them. |
+| Ctrl+P | Pin that session to the top of the list, or unpin it. |
 | F2 | Name that session. Enter saves, Esc cancels; an empty name gives it back its own title. |
 | Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted. |
 | Tab / Shift+Tab | Move along the pills (tools, running, workspace) and back to the list. Enter opens or switches the one in hand, Esc goes back to the list. |

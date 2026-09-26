@@ -33,6 +33,8 @@ Item {
   // The header pill Tab has put in hand: 0 tools, 1 running, 2 workspace;
   // -1 is the list.
   property int pill: -1
+  // Pinned sessions, first in the list: ids, kept in pins.json.
+  property var pins: []
   // → shows the last few messages of the session in hand beside the list.
   property bool peeking: false
   property var peekMessages: []
@@ -106,6 +108,7 @@ Item {
     root.folder = filters.folder
     root.runningOnly = filters.running
     root.pill = -1
+    root.pins = Model.savedPins(pinsFile.text())
     root.selected = 0
     root.statusMessage = ""
     root.sessions = []
@@ -173,7 +176,8 @@ Item {
     root.chips = chips
     var running = Model.runningIds(root.sessions, root.clients, root.backgroundSessions)
     var built = Model.rows(root.sessions, root.queryText, root.tool, Date.now(), root.home,
-      running, root.folder, root.runningOnly, Model.agentStates(root.sessions, running, root.clients, root.statuses))
+      running, root.folder, root.runningOnly, Model.agentStates(root.sessions, running, root.clients, root.statuses),
+      root.pins)
     root.viewRows = built.rows
     root.count = built.count
     if (root.selected >= root.count) root.selected = Math.max(0, root.count - 1)
@@ -384,6 +388,17 @@ Item {
   function chooseTool() {
     var at = toolPill.mapToItem(card, 0, toolPill.height + Style.space(4))
     toolMenu.show(Model.toolMenu(root.sessions), root.tool, at.x, at.y)
+  }
+
+  // Ctrl+P: the session in hand goes to the top, or back to its folder. The
+  // selection goes with it.
+  function togglePin(row) {
+    if (!row) return
+    root.pins = Model.togglePin(root.pins, row.id)
+    pinsFile.setText(JSON.stringify({ pins: root.pins }) + "\n")
+    root.refresh()
+    var at = Model.cursorOf(root.viewRows, row.id)
+    if (at >= 0) root.selectAbsolute(at)
   }
 
   function setPeeking(on) {
@@ -664,6 +679,15 @@ Item {
     onTriggered: root.loadPeek()
   }
 
+  // The pinned sessions, kept for the next launch.
+  FileView {
+    id: pinsFile
+    path: root.home + "/.local/state/omarchy/sessions/pins.json"
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+  }
+
   Process {
     id: renameProc
     stdout: StdioCollector {
@@ -811,6 +835,9 @@ Item {
           } else if (event.key === Qt.Key_F1 || ((event.modifiers & Qt.ControlModifier)
                      && (event.key === Qt.Key_Question || event.key === Qt.Key_Slash))) {
             sheet.opened = true
+            event.accepted = true
+          } else if (event.key === Qt.Key_P && (event.modifiers & Qt.ControlModifier)) {
+            root.togglePin(root.current)
             event.accepted = true
           } else if (event.key === Qt.Key_Right && root.pill < 0) {
             root.setPeeking(true)
@@ -1192,6 +1219,21 @@ Item {
                 font.pixelSize: Style.font.caption
               }
 
+              // A pinned session is away from its folder, so it names it.
+              Text {
+                id: rowFolder
+                visible: !sessionRow.header && sessionRow.entry && sessionRow.entry.pinned
+                textFormat: Text.PlainText
+                anchors.right: rowTool.visible ? rowTool.left : rowWhen.left
+                anchors.rightMargin: Style.space(14)
+                anchors.verticalCenter: parent.verticalCenter
+                text: visible ? sessionRow.entry.project : ""
+                color: root.foreground
+                opacity: 0.4
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
               Item {
                 id: rowTool
                 // Picking a tool makes the column say the same thing on every row.
@@ -1230,7 +1272,7 @@ Item {
                 textFormat: Text.StyledText
                 anchors.left: parent.left
                 anchors.leftMargin: root.rowInset + root.titleIndent
-                anchors.right: rowTool.visible ? rowTool.left : rowWhen.left
+                anchors.right: rowFolder.visible ? rowFolder.left : rowTool.visible ? rowTool.left : rowWhen.left
                 anchors.rightMargin: Style.space(14)
                 anchors.verticalCenter: parent.verticalCenter
                 text: sessionRow.entry && sessionRow.entry.title
