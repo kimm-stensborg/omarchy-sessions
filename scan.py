@@ -1092,6 +1092,21 @@ def claude_background(home):
     return found
 
 
+def claude_statuses(home):
+    """{session id: status} for each live Claude process, as Claude records
+    it: "busy" while it works, "idle" when it is your turn, "waiting" or
+    "blocked" while it asks you something."""
+    found = {}
+    for path in Path(home, ".claude", "sessions").glob("*.json"):
+        record = read_json(path)
+        if not isinstance(record, dict) or not record.get("sessionId") or not record.get("status"):
+            continue
+        pid = record.get("pid")
+        if isinstance(pid, int) and Path(f"/proc/{pid}").exists():
+            found[str(record["sessionId"])] = str(record["status"])
+    return found
+
+
 def grok_running(home):
     """{pid: session id} from Grok's list of open sessions."""
     running = {}
@@ -1166,6 +1181,7 @@ def herdr_panes(parents=None):
                 "pane": str(pane["pane_id"]),
                 "tab": str(pane.get("tab_id") or ""),
                 "workspace": str(pane.get("workspace_id") or ""),
+                "status": str(pane.get("agent_status") or ""),
                 "shell": shell,
                 "clients": clients,
             })
@@ -1257,6 +1273,7 @@ def describe_windows(clients, parents, marks_of, panes=()):
                     "pane": pane["pane"],
                     "tab": pane["tab"],
                     "workspace": pane["workspace"],
+                    "status": pane.get("status", ""),
                     "text": "\n".join(pane_marks),
                 })
         described.append({"address": address, "text": "\n".join(marks), "panes": inside})
@@ -1272,6 +1289,13 @@ def window_clients(home=None):
     parents = process_parents()
     return describe_windows(clients, parents, lambda pid: process_marks(pid, running),
                             herdr_panes(parents) + tmux_panes())
+
+
+def live(home=None):
+    """What the open panel polls: the windows, and how each running agent is
+    doing (herdr's panes carry their own status too)."""
+    home = Path(home) if home else home_dir()
+    return {"windows": window_clients(home), "statuses": claude_statuses(home)}
 
 
 def launch(cwd, argv, spawn=None):
@@ -1657,6 +1681,7 @@ def main(argv):
         # usage [--max-age <seconds>]
         "usage": lambda: cached_usage(float(args[1]) if args[:1] == ["--max-age"] and len(args) > 1 else None),
         "clients": window_clients,
+        "live": live,
         "apps": apps_state,
         "open": lambda: open_session(args[0], args[1], args[2], args[3], args[4:], create=create),
         # rename <tool> <id> <title>  -- an empty title takes the name away

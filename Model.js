@@ -199,7 +199,8 @@ function relativeTime(updated, now) {
 // what the keyboard moves through. `running` marks the ids a window already has.
 // `folder`, when given, keeps only the sessions of that one folder, and
 // `onlyRunning` only those already running.
-function rows(sessions, query, tool, now, home, running, folder, onlyRunning) {
+// `states` says how each running agent is doing (see agentState).
+function rows(sessions, query, tool, now, home, running, folder, onlyRunning, states) {
   var wanted = str(tool).trim()
   var inFolder = str(folder).trim()
   var groups = []
@@ -238,7 +239,8 @@ function rows(sessions, query, tool, now, home, running, folder, onlyRunning) {
         title: session.title,
         project: label,
         when: relativeTime(session.updated, now),
-        running: !!(running && running[session.id])
+        running: !!(running && running[session.id]),
+        state: (states && states[session.id]) || ""
       })
       cursor += 1
     }
@@ -579,6 +581,40 @@ function runningIds(sessions, clients, background) {
       running[list[i].id] = true
   }
   return running
+}
+
+// How a running agent is doing: "working", "yours" (done, your turn) or
+// "asking" (waiting on an answer from you), else "". Claude's own record
+// says it for Claude; herdr's pane status says it for any agent it runs.
+var CLAUDE_STATES = { busy: "working", idle: "yours", waiting: "asking", blocked: "asking" }
+var HERDR_STATES = { working: "working", idle: "yours", done: "yours", blocked: "asking" }
+
+function agentState(session, clients, statuses) {
+  var id = session && session.id ? String(session.id) : ""
+  if (!id) return ""
+  var own = statuses ? CLAUDE_STATES[statuses[id]] : ""
+  if (own) return own
+  var client = matchClient(session, clients)
+  var pane = client ? matchPane(session, client) : null
+  return pane && HERDR_STATES[pane.status] ? HERDR_STATES[pane.status] : ""
+}
+
+// {session id: state} for the running sessions.
+function agentStates(sessions, running, clients, statuses) {
+  var states = {}
+  var list = sessions || []
+  for (var i = 0; i < list.length; i++) {
+    if (!running || !running[list[i].id]) continue
+    var state = agentState(list[i], clients, statuses)
+    if (state) states[list[i].id] = state
+  }
+  return states
+}
+
+var STATE_LABELS = { working: "working…", yours: "your turn", asking: "needs you" }
+
+function stateLabel(state) {
+  return STATE_LABELS[state] || ""
 }
 
 // The window to bring forward for a session, or null when it has to be

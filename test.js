@@ -352,6 +352,15 @@ check("tab walks the pills and back to the list", [M.nextPill(-1, 1), M.nextPill
 check("the tool pill lists all tools, then those with sessions", M.toolMenu(spots).map(t => t.label), ["All tools", "Claude", "Grok", "Codex"])
 check("on a pill the foot says what enter does there", M.footerHints({ running: false }, "", 1).map(h => h.join(" ")), ["enter switches", "tab next", "esc back to the list"])
 
+const agentWindows = [{ address: "0x1", text: "herdr x-sess", panes: [{ kind: "herdr", pane: "w1:p1", text: "codex resume x-sess", status: "blocked" }] }]
+check("claude's own record says how it is doing", M.agentState({ id: "c-sess" }, [], { "c-sess": "busy" }), "working")
+check("herdr's pane says it for any agent", M.agentState({ id: "x-sess" }, agentWindows, {}), "asking")
+check("an idle claude is your turn, an unknown status nothing", [M.agentState({ id: "a" }, [], { a: "idle" }), M.agentState({ id: "a" }, [], { a: "odd" })], ["yours", ""])
+check("only running sessions get a state", M.agentStates([{ id: "a" }, { id: "b" }], { a: true }, [], { a: "idle", b: "busy" }), { a: "yours" })
+check("rows carry the state", M.rows(spots, "", "", NOW, HOME, { c: true }, "", false, { c: "working" }).rows.filter(r => r.id === "c")[0].state, "working")
+check("a state reads as words", [M.stateLabel("working"), M.stateLabel("yours"), M.stateLabel("asking"), M.stateLabel("")], ["working…", "your turn", "needs you", ""])
+
+
 if (failures.length) {
   console.log(failures.join("\n"))
   console.log(failures.length + " failed, " + (checks - failures.length) + " ok")

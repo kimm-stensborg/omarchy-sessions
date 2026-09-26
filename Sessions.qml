@@ -43,6 +43,10 @@ Item {
   property var clients: []
   // Claude sessions running in the background, from scan.py `list`.
   property var backgroundSessions: []
+  // How each running Claude is doing, from its own record: scan.py `live`.
+  property var statuses: ({})
+  // What `live` last said, to rebuild the list only when something changed.
+  property string liveText: ""
   // Where sessions open: the installed apps, the default and each session's
   // own, from scan.py `apps`.
   property var apps: ({ available: ["terminal"], default: "terminal", sessions: {} })
@@ -109,9 +113,8 @@ Item {
     themeFile.reload()
     root.runScan()
     root.runUsage()
-    runningProc.running = false
-    runningProc.command = root.scanCommand(["clients"])
-    runningProc.running = true
+    root.liveText = ""
+    root.pollLive()
     appsProc.running = false
     appsProc.command = root.scanCommand(["apps"])
     appsProc.running = true
@@ -129,6 +132,14 @@ Item {
   }
 
   function ping() { return "ok" }
+
+  // The windows and how each agent is doing, asked again every few seconds
+  // while the panel is open, so "working…" turns into "your turn" in place.
+  function pollLive() {
+    if (runningProc.running) return
+    runningProc.command = root.scanCommand(["live"])
+    runningProc.running = true
+  }
 
   function scanCommand(args) {
     return ["python3", root.pluginDir + "/scan.py"].concat(args)
@@ -155,8 +166,9 @@ Item {
     // to drop the one asked for (the window scan can finish first).
     if (!stillThere && root.sessions.length > 0) root.tool = ""
     root.chips = chips
+    var running = Model.runningIds(root.sessions, root.clients, root.backgroundSessions)
     var built = Model.rows(root.sessions, root.queryText, root.tool, Date.now(), root.home,
-      Model.runningIds(root.sessions, root.clients, root.backgroundSessions), root.folder, root.runningOnly)
+      running, root.folder, root.runningOnly, Model.agentStates(root.sessions, running, root.clients, root.statuses))
     root.viewRows = built.rows
     root.count = built.count
     if (root.selected >= root.count) root.selected = Math.max(0, root.count - 1)
@@ -549,7 +561,7 @@ Item {
     id: whenMetrics
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption
-    text: "just now"
+    text: "needs you"
   }
 
   Process {
@@ -623,11 +635,23 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        root.clients = root.parseJson(text) || []
-        root.refresh()
+        if (!root.opened || text === root.liveText) return
+        var payload = root.parseJson(text) || ({})
+        root.liveText = text
+        root.clients = payload.windows || []
+        root.statuses = payload.statuses || ({})
+        // A deleted row still folding away rebuilds when it is gone.
+        if (!root.folding.length) root.refresh()
         root.rememberPanes()
       }
     }
+  }
+
+  Timer {
+    interval: 3000
+    repeat: true
+    running: root.opened
+    onTriggered: root.pollLive()
   }
 
   // The theme's named colours, for the tools, matches and warnings. Read
@@ -1071,14 +1095,25 @@ Item {
               }
 
               // Already running in a window, so Enter focuses it rather than opening one.
+              // It breathes while the agent works.
               Rectangle {
+                id: runningDot
+                readonly property bool working: sessionRow.entry && sessionRow.entry.state === "working"
                 visible: !sessionRow.header && sessionRow.entry && sessionRow.entry.running
                 width: Style.space(6)
                 height: width
                 radius: width / 2
                 x: root.rowInset + (root.titleIndent - width) / 2 - Style.space(2)
                 anchors.verticalCenter: parent.verticalCenter
-                color: root.runningColor
+                color: sessionRow.entry && sessionRow.entry.state === "asking" ? root.warningColor : root.runningColor
+
+                SequentialAnimation on opacity {
+                  running: runningDot.working && runningDot.visible
+                  loops: Animation.Infinite
+                  onRunningChanged: if (!running) runningDot.opacity = 1
+                  NumberAnimation { to: 0.25; duration: 700; easing.type: Easing.InOutSine }
+                  NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
+                }
               }
 
               Text {
@@ -1090,9 +1125,13 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: whenMetrics.width
                 horizontalAlignment: Text.AlignRight
-                text: sessionRow.entry && sessionRow.entry.when ? sessionRow.entry.when : ""
-                color: root.foreground
-                opacity: 0.45
+                // A running agent says how it is doing in place of when.
+                readonly property string agent: sessionRow.entry ? sessionRow.entry.state || "" : ""
+                text: rowWhen.agent ? Model.stateLabel(rowWhen.agent)
+                  : sessionRow.entry && sessionRow.entry.when ? sessionRow.entry.when : ""
+                color: rowWhen.agent === "asking" ? root.warningColor
+                  : rowWhen.agent === "yours" ? root.runningColor : root.foreground
+                opacity: rowWhen.agent === "asking" || rowWhen.agent === "yours" ? 1 : 0.45
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
               }
