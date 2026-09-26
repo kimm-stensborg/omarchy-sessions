@@ -34,6 +34,10 @@ A session shows, in this order: a name you gave it, the title the tool generated
 
 At the foot of the panel, a strip of fixed height gives each subscription that has numbers a column, side by side, whichever tool is picked above; the list never moves as the numbers come in. Claude, Codex and Fireworks use the usage records Omarchy writes. Grok's column is the weekly allowance from the same billing figure `/usage` shows, and Cursor's the monthly plan from the same screen as `agent` `/usage`. A subscription with nothing recorded yet is left off the strip. Each allowance that renews gets its own line and meter, with when it renews: a countdown inside a day, the weekday and time inside a week, the date after that. Claude shows its week and, under it, its 5-hour session, so every column opens on its longest allowance. Clicking a column shows only that tool's sessions. Shares inside an allowance (Grok's Build and Chat, Cursor's Auto and API), the last seven days and the split by model are in the bar's popup, described below.
 
+## Starting a session
+
+Ctrl+Enter asks for a tool and a workspace, then starts a new conversation there in the default app. It starts on the tool and folder of the session in hand; the tools offered are the installed ones (`claude`, `grok`, `codex`, and `agent` for Cursor). The workspaces are every folder a session was held in, newest first, with a dot for each tool used there. Typing narrows them by name and path, every word has to match; the arrows move through them, ←/→ or Tab switch tool, Enter starts, and Esc clears what was typed, then cancels.
+
 ## Where sessions open
 
 A session that is not running opens in **herdr**, **tmux** or a plain **Terminal**; only the installed ones are offered. It opens where it was opened last, and otherwise in the default, which is herdr when it is installed. Shift+Enter asks instead: pick an app with the arrows or Tab and Enter, and that session opens there from then on; `d` makes the highlighted one the default.
@@ -108,7 +112,7 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | Up / Down | Move from the newest session towards the oldest and back. It stops at either end rather than wrapping round. Headers are skipped. |
 | Enter | Focus the terminal already running that session, or open it resumed where it was opened last (herdr, tmux or a terminal), else in the default. |
 | Shift+Enter | Choose where it opens: herdr, tmux or Terminal. The choice is remembered for that session; `d` in the chooser makes it the default. |
-| Ctrl+Enter | Start a new conversation with that session's tool, in its folder, in the default app. |
+| Ctrl+Enter | Start a new conversation: pick the tool and the workspace, those of the session in hand to start with. It opens in the default app. |
 | F2 | Name that session. Enter saves, Esc cancels; an empty name gives it back its own title. |
 | Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted. |
 | Tab / Shift+Tab | Step to the next or previous chip: All, then each tool, and round again. |
@@ -146,6 +150,7 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 | `BarWidget.qml` | The bar button, its setting, the five-minute refresh, and the popup's key. |
 | `UsagePanel.qml` | The popup under the bar button. |
 | `RenameDialog.qml` | The F2 dialog: naming a session. |
+| `WorkspacePicker.qml` | The Ctrl+Enter dialog: a tool and a workspace for a new session. |
 | `AppChooser.qml` | The Shift+Enter chooser: which app a session opens in. |
 | `UsageBand.qml` | The fixed-height strip of subscriptions at the foot of the Sessions panel. |
 | `Model.js` | Titles, grouping, search, the resume command, and which window is already that session. |

@@ -326,8 +326,9 @@ class Opening(unittest.TestCase):
             path = Path(tmp) / "apps.json"
             everything = scan.apps_state(path, which=lambda name: "/usr/bin/" + name)
             self.assertEqual([everything["available"], everything["default"]], [["herdr", "tmux", "terminal"], "herdr"])
+            self.assertEqual(everything["tools"], ["claude", "grok", "codex", "cursor"])
             bare = scan.apps_state(path, which=lambda name: None)
-            self.assertEqual([bare["available"], bare["default"]], [["terminal"], "terminal"])
+            self.assertEqual([bare["available"], bare["default"], bare["tools"]], [["terminal"], "terminal", []])
             scan.set_default_app("tmux", path)
             scan.remember_apps([self.ID + "=terminal", "../x=herdr", self.ID[:-1] + "f=nano"], path)
             state = scan.apps_state(path, which=lambda name: "/usr/bin/" + name)

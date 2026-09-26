@@ -107,6 +107,7 @@ Item {
 
   function close() {
     root.opened = false
+    picker.opened = false
     scanProc.running = false
     usageProc.running = false
     clientProc.running = false
@@ -305,11 +306,20 @@ Item {
     root.refresh()
   }
 
-  // A new conversation with the row's tool, in the row's folder.
+  // A new conversation: a tool and a workspace are asked for, the row's
+  // own to start with.
   function startNew(row) {
-    var argv = row ? Model.newArgv(row.tool) : null
+    var tool = row ? row.tool : (root.tool || "claude")
+    var cwd = row ? row.cwd : ""
+    picker.show("new", Model.workspaces(root.sessions, root.home), cwd,
+      Model.newTools(root.apps, root.sessions), tool)
+  }
+
+  function startIn(tool, cwd) {
+    var argv = Model.newArgv(tool)
+    picker.opened = false
     if (!argv) return
-    root.openIn(root.apps.default, row, argv, false)
+    root.openIn(root.apps.default, { cwd: cwd, title: Model.toolLabel(tool) }, argv, false)
   }
 
   // Closed first, as for focusing: herdr and tmux bring their window
@@ -584,6 +594,11 @@ Item {
         Keys.onPressed: function(event) {
           // While asking, DEL or Enter deletes and Esc cancels; nothing else
           // reaches the list or the search line.
+          if (picker.opened) {
+            picker.handleKey(event)
+            event.accepted = true
+            return
+          }
           if (chooser.opened) {
             chooser.handleKey(event)
             event.accepted = true
@@ -770,6 +785,7 @@ Item {
               }
             }
           }
+
         }
 
         Item {
@@ -979,7 +995,7 @@ Item {
         Text {
           width: parent.width
           textFormat: Text.PlainText
-          text: "enter resumes    shift+enter opens in…    ctrl+enter starts new    f2 renames    del deletes    tab switches tool    esc closes"
+          text: "enter resumes    shift+enter opens in…    ctrl+enter new    f2 renames    del deletes    tab tool    esc closes"
           color: root.foreground
           opacity: 0.35
           font.family: root.fontFamily
@@ -999,6 +1015,26 @@ Item {
         cornerRadius: root.cornerRadius
         onSaved: function(title) { root.saveRename(title) }
         onCanceled: root.finishRename()
+      }
+
+      // Ctrl+Enter: the tool and workspace of a new session.
+      WorkspacePicker {
+        id: picker
+        anchors.fill: parent
+        themeColors: root.themeColors
+        background: root.background
+        foreground: root.foreground
+        selectedBackground: root.selectedBackground
+        selectedText: root.selectedText
+        accent: root.accent
+        fontFamily: root.fontFamily
+        cornerRadius: root.cornerRadius
+        onStarted: function(tool, cwd) { root.startIn(tool, cwd) }
+        onChose: function(cwd) {
+          picker.opened = false
+          root.showFolder(cwd)
+        }
+        onCanceled: picker.opened = false
       }
 
       // Shift+Enter: which app a session opens in, remembered for it.

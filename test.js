@@ -301,6 +301,22 @@ check("grok's days come from its session files", M.usageFrom([], [
   { day: "2026-09-25", models: [{ id: "grok-4.7-build", input: 1000, output: 500, cacheRead: 0, cacheWrite: 0 }] }
 ], NOW)[0].days.slice(-1)[0].label, "1.5K")
 
+const spots = [
+  { tool: "claude", id: "a", cwd: "/home/kimm/Projects/casino", key: "/home/kimm/Projects/casino", title: "x", updated: 5, project: "casino" },
+  { tool: "codex", id: "b", cwd: "/work/casino", key: "/work/casino", title: "y", updated: 4, project: "casino" },
+  { tool: "grok", id: "c", cwd: "/home/kimm/Projects/casino", key: "/home/kimm/Projects/casino", title: "z", updated: 3, project: "casino" },
+  { tool: "claude", id: "d", cwd: "/home/kimm", key: "/home/kimm", title: "w", updated: 2, project: "Home" },
+  { tool: "claude", id: "e", cwd: "", key: "e", title: "v", updated: 1, project: "Elsewhere" }
+]
+const places = M.workspaces(spots, HOME)
+check("workspaces: each folder once, newest first, named like the headers", places.map(w => [w.label, w.path, w.count, w.tools]),
+  [["Projects/casino", "~/Projects/casino", 2, ["claude", "grok"]], ["work/casino", "/work/casino", 1, ["codex"]], ["Home", "~", 1, ["claude"]]])
+check("workspaces filter on name and path, every word", M.filterWorkspaces(places, "cas proj").map(w => w.cwd), ["/home/kimm/Projects/casino"])
+check("an empty filter keeps them all", M.filterWorkspaces(places, " ").length, 3)
+check("a workspace is found by folder", [M.workspaceIndex(places, "/work/casino"), M.workspaceIndex(places, "/nope")], [1, -1])
+check("new sessions start with the installed tools", M.newTools({ tools: ["cursor", "claude"] }, spots).map(t => t.id), ["claude", "cursor"])
+check("without that, with the tools that have sessions", M.newTools({}, spots).map(t => t.id), ["claude", "grok", "codex"])
+
 if (failures.length) {
   console.log(failures.join("\n"))
   console.log(failures.length + " failed, " + (checks - failures.length) + " ok")

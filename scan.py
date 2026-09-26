@@ -1359,13 +1359,19 @@ def write_apps(data, path=None):
     partial.replace(path)
 
 
+# The command each tool starts a new session with.
+TOOL_COMMANDS = {"claude": "claude", "grok": "grok", "codex": "codex", "cursor": "agent"}
+
+
 def apps_state(path=None, which=shutil.which):
     """What the panel needs to pick an app: the installed ones, the default
-    (herdr when installed unless set otherwise) and each session's own."""
+    (herdr when installed unless set otherwise) and each session's own; and
+    the tools installed to start a new session with."""
     available = available_apps(which)
     stored = read_apps(path)
     default = stored["default"] if stored["default"] in available else available[0]
-    return {"available": available, "default": default, "sessions": stored["sessions"]}
+    tools = [tool for tool, command in TOOL_COMMANDS.items() if which(command) is not None]
+    return {"available": available, "default": default, "sessions": stored["sessions"], "tools": tools}
 
 
 def remember_apps(pairs, path=None):

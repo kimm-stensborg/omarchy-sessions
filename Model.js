@@ -252,6 +252,73 @@ function toolsPresent(sessions) {
   return out
 }
 
+// Every folder a session was held in, newest first, once each: the
+// workspaces a new session can start in and the list can be narrowed to.
+// Named as the headers name them; `path` is the folder with ~ for home.
+function workspaces(sessions, home) {
+  var list = []
+  var seen = {}
+  var source = sessions || []
+  for (var i = 0; i < source.length; i++) {
+    var cwd = source[i].cwd
+    if (!cwd) continue
+    if (seen[cwd]) {
+      seen[cwd].count += 1
+      continue
+    }
+    seen[cwd] = { cwd: cwd, count: 1, updated: source[i].updated, tools: [] }
+    list.push(seen[cwd])
+  }
+  for (var j = 0; j < source.length; j++) {
+    var entry = seen[source[j].cwd]
+    if (entry && entry.tools.indexOf(source[j].tool) === -1) entry.tools.push(source[j].tool)
+  }
+  var labels = labelMap(list.map(function(entry) { return { key: entry.cwd } }), home)
+  return list.map(function(entry) {
+    return { cwd: entry.cwd, label: labels[entry.cwd], path: tildePath(entry.cwd, home), count: entry.count, tools: entry.tools }
+  })
+}
+
+function tildePath(cwd, home) {
+  var path = cleanPath(cwd)
+  var homePath = cleanPath(home)
+  if (homePath && path === homePath) return "~"
+  if (homePath && path.indexOf(homePath + "/") === 0) return "~" + path.slice(homePath.length)
+  return path
+}
+
+// The workspaces whose name or path holds every typed word.
+function filterWorkspaces(list, query) {
+  var words = str(query).trim().toLowerCase().split(/\s+/).filter(function(word) { return word })
+  return (list || []).filter(function(entry) {
+    var hay = (entry.label + " " + entry.path).toLowerCase()
+    for (var i = 0; i < words.length; i++) {
+      if (hay.indexOf(words[i]) === -1) return false
+    }
+    return true
+  })
+}
+
+function workspaceIndex(list, cwd) {
+  var items = list || []
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].cwd === cwd) return i
+  }
+  return -1
+}
+
+// The tools a new session can start with: the installed ones, as scan.py
+// found them, else those that have sessions here.
+function newTools(apps, sessions) {
+  var installed = apps && apps.tools
+  if (!installed || !installed.length) return toolsPresent(sessions)
+  var out = []
+  for (var i = 0; i < TOOLS.length; i++) {
+    if (installed.indexOf(TOOLS[i]) !== -1) out.push({ id: TOOLS[i], label: toolLabel(TOOLS[i]) })
+  }
+  return out
+}
+
 // The chip `delta` steps from the current one, round the ends, so Tab and
 // Shift+Tab cycle All and each tool.
 function nextTool(chips, current, delta) {
