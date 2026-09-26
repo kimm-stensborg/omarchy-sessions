@@ -33,6 +33,11 @@ Item {
   // The header pill Tab has put in hand: 0 tools, 1 running, 2 workspace;
   // -1 is the list.
   property int pill: -1
+  // → shows the last few messages of the session in hand beside the list.
+  property bool peeking: false
+  property var peekMessages: []
+  property string peekPhase: "loading"
+  property string peekId: ""
   property int selected: 0
   property var sessions: []
   property var viewRows: []
@@ -381,6 +386,31 @@ Item {
     toolMenu.show(Model.toolMenu(root.sessions), root.tool, at.x, at.y)
   }
 
+  function setPeeking(on) {
+    root.peeking = on
+    root.peekId = ""
+    if (on) root.loadPeek()
+  }
+
+  // The session in hand, peeked at once the selection has settled.
+  function loadPeek() {
+    var row = root.current
+    if (!root.peeking || !row) {
+      root.peekMessages = []
+      root.peekPhase = "none"
+      return
+    }
+    if (row.id === root.peekId) return
+    root.peekId = row.id
+    root.peekPhase = "loading"
+    peekProc.running = false
+    peekProc.asked = row.id
+    peekProc.command = root.scanCommand(["peek", row.tool, row.id])
+    peekProc.running = true
+  }
+
+  onCurrentChanged: if (root.peeking) peekDelay.restart()
+
   // Enter on the pill in hand.
   function usePill(which) {
     if (which === 0) root.chooseTool()
@@ -615,6 +645,26 @@ Item {
   }
 
   Process {
+    id: peekProc
+    property string asked: ""
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (peekProc.asked !== root.peekId) return
+        var payload = root.parseJson(text)
+        root.peekMessages = payload && payload.ok ? payload.messages || [] : []
+        root.peekPhase = root.peekMessages.length ? "ready" : "none"
+      }
+    }
+  }
+
+  Timer {
+    id: peekDelay
+    interval: 120
+    onTriggered: root.loadPeek()
+  }
+
+  Process {
     id: renameProc
     stdout: StdioCollector {
       waitForEnd: true
@@ -761,6 +811,12 @@ Item {
           } else if (event.key === Qt.Key_F1 || ((event.modifiers & Qt.ControlModifier)
                      && (event.key === Qt.Key_Question || event.key === Qt.Key_Slash))) {
             sheet.opened = true
+            event.accepted = true
+          } else if (event.key === Qt.Key_Right && root.pill < 0) {
+            root.setPeeking(true)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Left && root.pill < 0) {
+            root.setPeeking(false)
             event.accepted = true
           } else if (event.key === Qt.Key_T && (event.modifiers & Qt.ControlModifier)) {
             root.chooseTool()
@@ -1041,7 +1097,7 @@ Item {
             id: resultList
             anchors.fill: parent
             anchors.leftMargin: -root.rowInset
-            anchors.rightMargin: -root.rowInset
+            anchors.rightMargin: root.peeking ? peekPane.width + Style.space(12) : -root.rowInset
             model: root.viewRows.length
             clip: true
             spacing: Style.space(2)
@@ -1216,7 +1272,7 @@ Item {
           // The list goes on below: let it fade out rather than stop mid-row.
           Rectangle {
             anchors.left: parent.left
-            anchors.right: parent.right
+            anchors.right: resultList.right
             anchors.bottom: parent.bottom
             height: Style.space(36)
             visible: root.count > 0 && !resultList.atYEnd
@@ -1239,6 +1295,22 @@ Item {
             opacity: 0.65
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
+          }
+
+          PeekPane {
+            id: peekPane
+            visible: root.peeking
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            width: Math.round(parent.width * 0.44)
+            messages: root.peekMessages
+            phase: root.peekPhase
+            agentLabel: root.current ? root.current.toolLabel : ""
+            fontFamily: root.fontFamily
+            foreground: root.foreground
+            borderColor: root.borderColor
+            accent: root.accent
           }
         }
 
@@ -1271,7 +1343,7 @@ Item {
           spacing: Style.space(18)
 
           Repeater {
-            model: Model.footerHints(root.current, root.queryText, root.pill)
+            model: Model.footerHints(root.current, root.queryText, root.pill, root.peeking)
 
             Row {
               required property var modelData

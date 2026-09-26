@@ -58,6 +58,10 @@ A session that is not running opens in **herdr**, **tmux** or a plain **Terminal
 
 A Claude session running in the background (one Claude parked as a background job) counts as running but has no window of its own: Enter opens it with `claude attach` in its app, as Claude requires, rather than `--resume`, which Claude refuses for a running session. A session found running in a herdr or tmux pane is remembered there as well, so one started by hand opens there again next time. Sessions in tmux are brought forward in their pane, as herdr's are. Both are found through the terminal showing them, so a herdr server that has outlived the terminal that started it still counts. What is remembered lives in `~/.local/state/omarchy/sessions/apps.json`.
 
+## Peeking
+
+→ opens a pane beside the list with the last few things said in the session in hand: what you wrote and what the agent answered, without tool calls, newest at the bottom. It follows the selection as you move, and ← hides it. Only the tail of the transcript is read, so a long session opens as fast as a short one; a session whose last stretch is all tool work shows only the agent's words.
+
 ## Deleting a session
 
 Del on a session asks first, naming it; Del or Enter deletes, Esc keeps it. A session that is still running cannot be deleted: the panel will not offer it, and before deleting `scan.py` looks again across every process on the machine, not only the ones in a window, so a session in a background pane or job is safe too. A session another one was forked from (Claude's `--fork-session`, as a background session does) is not counted as running just because the fork started from it.
@@ -128,6 +132,7 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | Ctrl+W | Show only one workspace's sessions, picked from a list you can type to narrow. Same as clicking the workspace pill. |
 | Ctrl+R | Show only the running sessions, or all of them again. Same as the Running pill. |
 | Ctrl+T | Pick the tool whose sessions show, or all tools. Same as the tool pill. |
+| → / ← | Show the last messages of that session beside the list, or hide them. |
 | F2 | Name that session. Enter saves, Esc cancels; an empty name gives it back its own title. |
 | Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted. |
 | Tab / Shift+Tab | Move along the pills (tools, running, workspace) and back to the list. Enter opens or switches the one in hand, Esc goes back to the list. |
@@ -164,6 +169,7 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 |------|------|
 | `Sessions.qml` | The panel: search line, pills and the session list. |
 | `ToolMenu.qml` | The tool pill's list of tools. |
+| `PeekPane.qml` | The → pane: the last messages of the session in hand. |
 | `BarWidget.qml` | The bar button, its setting, the five-minute refresh, and the popup's key. |
 | `UsagePanel.qml` | The popup under the bar button. |
 | `RenameDialog.qml` | The F2 dialog: naming a session. |

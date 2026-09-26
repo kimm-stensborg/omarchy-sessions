@@ -318,6 +318,53 @@ class Delete(unittest.TestCase):
         self.assertTrue(scan.session_running(mine[0], Path.home()))
 
 
+class Peeking(unittest.TestCase):
+    ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    def write(self, path, records):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+
+    def test_the_last_things_said_without_tools_or_markup(self):
+        with tempfile.TemporaryDirectory() as home:
+            self.write(Path(home, ".claude", "projects", "-p", self.ID + ".jsonl"), [
+                {"type": "user", "message": {"content": "<command-name>/clear</command-name>"}},
+                {"type": "user", "message": {"content": "Fix the overlap"}},
+                {"type": "assistant", "message": {"content": [{"type": "text", "text": "Looking."},
+                                                              {"type": "tool_use", "name": "Read"}]}},
+                {"type": "user", "message": {"content": [{"type": "tool_result", "content": "file"}]}},
+                {"type": "assistant", "message": {"content": [{"type": "text", "text": "Fixed it."}]}},
+                {"type": "user", "isMeta": True, "message": {"content": "caveat"}},
+                {"type": "custom-title", "customTitle": "Overlap"},
+            ])
+            result = scan.peek("claude", self.ID, home)
+            self.assertEqual(result["messages"], [
+                {"role": "user", "text": "Fix the overlap"},
+                {"role": "assistant", "text": "Looking.\n\nFixed it."},
+            ])
+
+    def test_grok_and_codex_say_it_their_own_way(self):
+        with tempfile.TemporaryDirectory() as home:
+            self.write(Path(home, ".grok", "sessions", "%2Fp", self.ID, "chat_history.jsonl"), [
+                {"type": "system", "content": "You are Grok"},
+                {"type": "user", "content": [{"type": "text", "text": "<user_query>\nhej\n</user_query>"}]},
+                {"type": "assistant", "content": "Hej!"},
+            ])
+            self.assertEqual([m["text"] for m in scan.peek("grok", self.ID, home)["messages"]], ["hej", "Hej!"])
+        record = {"type": "response_item", "payload": {"type": "message", "role": "assistant",
+                                                       "content": [{"type": "output_text", "text": "Done."}]}}
+        role, content = scan.peek_message("codex", record)
+        self.assertEqual([role, scan.peek_text(content)], ["assistant", "Done."])
+
+    def test_markdown_marks_are_left_out(self):
+        self.assertEqual(scan.peek_text("Run **tests** with `node test.js`"), "Run tests with node test.js")
+
+    def test_only_a_real_id_is_looked_for(self):
+        with tempfile.TemporaryDirectory() as home:
+            self.assertFalse(scan.peek("claude", "../../etc/passwd", home)["ok"])
+            self.assertFalse(scan.peek("claude", self.ID, home)["ok"])
+
+
 class Forks(unittest.TestCase):
     def test_a_fork_does_not_keep_the_session_it_started_from_running(self):
         old = "/home/u/.claude/projects/p/f94a28db-a70f-4eb4-aa34-a39cc40c4399.jsonl"

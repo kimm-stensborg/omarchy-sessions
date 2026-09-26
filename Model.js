@@ -306,6 +306,7 @@ var SHORTCUTS = [
     ["Enter", "Resume, or focus if running"],
     ["Shift+Enter", "Choose where it opens"],
     ["Ctrl+Enter", "New session, tool and workspace"],
+    ["→ ←", "Peek at the last messages, hide"],
     ["F2", "Name the session"],
     ["Del", "Delete the session"]
   ] },
@@ -332,13 +333,15 @@ var SHORTCUTS = [
 // The few keys worth showing at the foot for what is in hand; the rest are
 // on the Ctrl+? sheet.
 // `pill` is the header pill in hand (0 tool, 1 running, 2 workspace), or -1.
-function footerHints(row, query, pill) {
+function footerHints(row, query, pill, peeking) {
   if (pill === 0 || pill === 2) return [["enter", "opens"], ["tab", "next"], ["esc", "back to the list"]]
   if (pill === 1) return [["enter", "switches"], ["tab", "next"], ["esc", "back to the list"]]
   var hints = []
   if (str(query)) hints.push(["esc", "clears"])
   if (row && row.running) hints.push(["enter", "focuses"])
   else if (row) hints.push(["enter", "resumes"], ["shift+enter", "opens in…"])
+  if (peeking) hints.push(["←", "hides peek"])
+  else if (row) hints.push(["→", "peek"])
   hints.push(["ctrl+enter", "new"], ["ctrl+?", "all shortcuts"])
   return hints
 }

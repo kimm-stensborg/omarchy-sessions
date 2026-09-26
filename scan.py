@@ -1615,6 +1615,122 @@ def session_files(tool, session_id, home):
     return [path for path in found if path.exists() and not path.is_symlink()]
 
 
+# Peeking: the last few messages of a session, read from the tail of its
+# transcript, so a long one costs no more than a short one.
+PEEK_BYTES = 256 * 1024
+PEEK_COUNT = 6
+PEEK_CHARS = 700
+
+
+def peek_text(content):
+    """What was said in a message: its text blocks (Codex's input_text and
+    output_text too), without tool calls and results. Cursor and Grok wrap
+    what was typed in <user_query>; a message that is only markup is none."""
+    if isinstance(content, list):
+        parts = [block.get("text") for block in content
+                 if isinstance(block, dict) and block.get("type") in ("text", "input_text", "output_text")
+                 and isinstance(block.get("text"), str)]
+        content = "\n".join(parts)
+    text = content if isinstance(content, str) else ""
+    match = USER_QUERY_RE.search(text)
+    if match:
+        text = match.group(1)
+    text = re.sub(r"\n{3,}", "\n\n", text.strip())
+    # Shown as plain text: Markdown's emphasis and code marks would only be noise.
+    text = re.sub(r"(\*\*|__)(.+?)\1", r"\2", text)
+    text = re.sub(r"`([^`\n]+)`", r"\1", text)
+    if not text or text.startswith(META_PREFIXES):
+        return ""
+    return text if len(text) <= PEEK_CHARS else text[: PEEK_CHARS - 1].rstrip() + "…"
+
+
+def peek_message(tool, record):
+    """(role, content) of one transcript line, or None when it is no message."""
+    if tool == "codex":
+        payload = record.get("payload")
+        if record.get("type") == "response_item" and isinstance(payload, dict) and payload.get("type") == "message":
+            return payload.get("role"), payload.get("content")
+        return None
+    if tool == "cursor":
+        message = record.get("message")
+        return record.get("role"), message.get("content") if isinstance(message, dict) else None
+    if tool == "claude":
+        if record.get("isMeta") or record.get("isSidechain"):
+            return None
+        message = record.get("message")
+        return record.get("type"), message.get("content") if isinstance(message, dict) else None
+    return record.get("type"), record.get("content")
+
+
+def peek_file(tool, session_id, home):
+    home = Path(home)
+    if tool == "claude":
+        found = [project / (session_id + ".jsonl") for project in subdirs(home / ".claude" / "projects")]
+    elif tool == "grok":
+        found = [cwd_dir / session_id / "chat_history.jsonl" for cwd_dir in subdirs(home / ".grok" / "sessions")]
+    elif tool == "cursor":
+        found = [project / "agent-transcripts" / session_id / (session_id + ".jsonl")
+                 for project in subdirs(home / ".cursor" / "projects")]
+    elif tool == "codex":
+        found = [Path(codex_rollout(home / ".codex", session_id) or "")]
+    else:
+        found = []
+    for path in found:
+        if str(path) not in ("", ".") and path.is_file() and not path.is_symlink():
+            return path
+    return None
+
+
+def codex_rollout(root, session_id):
+    database = codex_database(root)
+    if database is None:
+        return ""
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=1)
+        try:
+            row = connection.execute("SELECT rollout_path FROM threads WHERE id = ?", (session_id,)).fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return ""
+    return row[0] if row and isinstance(row[0], str) else ""
+
+
+def peek(tool, session_id, home=None):
+    """The last few things said in a session, oldest first: [{role, text}]."""
+    home = Path(home) if home else home_dir()
+    if not SESSION_ID_RE.fullmatch(session_id or ""):
+        return {"ok": False, "error": "no such session"}
+    path = peek_file(tool, session_id, home)
+    if path is None:
+        return {"ok": False, "error": "no transcript"}
+    messages = []
+    try:
+        with path.open("rb") as handle:
+            size = handle.seek(0, 2)
+            handle.seek(max(0, size - PEEK_BYTES))
+            chunk = handle.read().decode("utf-8", "replace")
+    except OSError:
+        return {"ok": False, "error": "could not read it"}
+    lines = chunk.splitlines()
+    if size > PEEK_BYTES:
+        lines = lines[1:]  # the seek lands mid-line
+    for line in lines:
+        record = load_line(line)
+        found = peek_message(tool, record) if record else None
+        if not found or found[0] not in ("user", "assistant"):
+            continue
+        text = peek_text(found[1])
+        if not text:
+            continue
+        # A reply that comes in several pieces reads as one.
+        if messages and messages[-1]["role"] == found[0] == "assistant":
+            messages[-1]["text"] = (messages[-1]["text"] + "\n\n" + text)[-PEEK_CHARS * 2:]
+        else:
+            messages.append({"role": found[0], "text": text})
+    return {"ok": True, "messages": messages[-PEEK_COUNT:]}
+
+
 def glob_escape(text):
     return re.sub(r"([*?\[])", r"[\1]", text)
 
@@ -1682,6 +1798,8 @@ def main(argv):
         "usage": lambda: cached_usage(float(args[1]) if args[:1] == ["--max-age"] and len(args) > 1 else None),
         "clients": window_clients,
         "live": live,
+        # peek <tool> <id>
+        "peek": lambda: peek(*(args[:2] + ["", ""])[:2]),
         "apps": apps_state,
         "open": lambda: open_session(args[0], args[1], args[2], args[3], args[4:], create=create),
         # rename <tool> <id> <title>  -- an empty title takes the name away
