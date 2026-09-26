@@ -420,6 +420,22 @@ class Opening(unittest.TestCase):
         self.assertEqual([(p["pane"], p["clients"]) for p in panes], [("%3", [101]), ("%7", [])])
 
 
+class Titles(unittest.TestCase):
+    ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    def test_cursor_takes_its_own_title_and_folder_but_not_its_placeholder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.jsonl"
+            transcript.write_text("\n".join([
+                json.dumps({"role": "user", "message": {"content": "<user_query>where is it</user_query>"}}),
+                json.dumps({"role": "assistant", "message": {"content": [{"type": "text", "text": "Looking now."}]}}),
+            ]), encoding="utf-8")
+            named = scan.cursor_raw(transcript, "home-kimm-x", "/guess", {"title": "Project Guidance", "cwd": "/home/kimm/Work"})
+            placeholder = scan.cursor_raw(transcript, "home-kimm-x", "/guess", {"title": "New Agent"})
+        self.assertEqual([named["title"], named["cwd"], named["firstReply"]], ["Project Guidance", "/home/kimm/Work", "Looking now."])
+        self.assertEqual([placeholder["title"], placeholder["cwd"]], ["", "/guess"])
+
+
 class CursorAllowance(unittest.TestCase):
     def test_period_usage_matches_the_agent_screen(self):
         parsed = scan.parse_cursor_allowance({

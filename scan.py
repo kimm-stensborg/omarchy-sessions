@@ -295,27 +295,42 @@ def fs_list_dir(path):
     return [child.name for child in subdirs(path)]
 
 
-def cursor_raw(transcript, encoded, cwd):
+# What Cursor calls a chat before it has named it.
+CURSOR_PLACEHOLDER_TITLES = {"New Agent", "New Chat"}
+
+
+def cursor_raw(transcript, encoded, cwd, meta=None):
+    """The first prompt and answer from a transcript, and the title and
+    folder Cursor keeps for the chat in its meta.json."""
     transcript = Path(transcript)
     mtime = mtime_of(transcript)
     if mtime is None:
         return None
     mtime_ms = int(mtime * 1000)
     first_user = ""
+    first_reply = ""
     try:
         with transcript.open("r", encoding="utf-8", errors="replace") as handle:
             for index, line in enumerate(handle):
-                if index >= HEAD_LINES or first_user:
+                if index >= HEAD_LINES or first_reply:
                     break
                 record = load_line(line)
-                if not record or record.get("role") != "user":
-                    continue
-                message = record.get("message")
+                role = record.get("role") if record else None
+                message = record.get("message") if record else None
                 content = message.get("content") if isinstance(message, dict) else ""
-                first_user = usable_text(content)
+                if role == "user" and not first_user:
+                    first_user = usable_text(content)
+                elif role == "assistant" and first_user:
+                    first_reply = usable_text(content)
     except OSError:
         return None
-    if not first_user:
+    meta = meta if isinstance(meta, dict) else {}
+    title = one_line(meta.get("title") if isinstance(meta.get("title"), str) else "")
+    if title in CURSOR_PLACEHOLDER_TITLES:
+        title = ""
+    if isinstance(meta.get("cwd"), str) and meta["cwd"]:
+        cwd = meta["cwd"]
+    if not (first_user or title):
         return None
     fallback = encoded.split("-")[-1] if encoded else ""
     return {
@@ -324,11 +339,24 @@ def cursor_raw(transcript, encoded, cwd):
         "cwd": cwd,
         "fallback": "" if cwd else fallback,
         "updated": mtime_ms,
+        "title": title,
         "firstUser": first_user,
+        "firstReply": first_reply,
     }
 
 
-def cursor_sessions(root, list_dir=fs_list_dir):
+def cursor_chat_meta(chats_root):
+    """{chat id: meta.json} for every chat under ~/.config/cursor/chats/<hash>/<id>/."""
+    metas = {}
+    for workspace in subdirs(chats_root):
+        for chat in subdirs(workspace):
+            meta = read_json(chat / "meta.json")
+            if isinstance(meta, dict):
+                metas[chat.name] = meta
+    return metas
+
+
+def cursor_sessions(root, list_dir=fs_list_dir, chats_root=None):
     # Transcripts sit at projects/<project>/agent-transcripts/<id>/<id>.jsonl.
     found = []
     for project in subdirs(root):
@@ -339,10 +367,11 @@ def cursor_sessions(root, list_dir=fs_list_dir):
             mtime = mtime_of(transcript)
             if mtime is not None:
                 found.append((mtime, project.name, transcript))
+    metas = cursor_chat_meta(chats_root) if chats_root else {}
     sessions = []
     for _, encoded, transcript in newest(found, CURSOR_LIMIT):
         cwd = resolve_dashed_path(encoded, list_dir)
-        raw = cursor_raw(transcript, encoded, cwd)
+        raw = cursor_raw(transcript, encoded, cwd, metas.get(transcript.stem))
         if raw:
             sessions.append(raw)
     return sessions
@@ -794,7 +823,8 @@ def collect(home=None):
         ("claude", lambda: claude_sessions(home / ".claude" / "projects")),
         ("grok", lambda: grok_sessions(home / ".grok" / "sessions")),
         ("codex", lambda: codex_sessions(home / ".codex")),
-        ("cursor", lambda: cursor_sessions(home / ".cursor" / "projects")),
+        ("cursor", lambda: cursor_sessions(home / ".cursor" / "projects",
+                                           chats_root=home / ".config" / "cursor" / "chats")),
     )
     for name, read in readers:
         try:
