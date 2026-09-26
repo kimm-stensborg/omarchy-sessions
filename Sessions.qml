@@ -90,6 +90,7 @@ Item {
     root.count = 0
     root.usage = []
     root.clients = []
+    root.autotitleTried = false
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     themeFile.reload()
     root.runScan()
@@ -186,6 +187,13 @@ Item {
     root.sessions = Model.normalize(payload.sessions, root.home)
     root.refresh()
     root.rememberPanes()
+    // Sessions no tool has named get a title from a small model, once each,
+    // in the background; the list is read again when they are in.
+    if (payload.untitled > 0 && !root.autotitleTried) {
+      root.autotitleTried = true
+      autotitleProc.command = root.scanCommand(["autotitle"])
+      autotitleProc.running = true
+    }
     if (root.sessions.length === 0 && payload.warnings && payload.warnings.length > 0)
       root.statusMessage = String(payload.warnings[0])
   }
@@ -242,6 +250,7 @@ Item {
   // DEL asks first; a session some process is still running is not offered
   // at all. scan.py checks again, across every process, before it deletes.
   property var pendingDelete: null
+  property bool autotitleTried: false
 
   function askDelete(row) {
     if (!row) return
@@ -477,6 +486,17 @@ Item {
   }
 
   Process { id: rememberProc }
+
+  Process {
+    id: autotitleProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var payload = root.parseJson(text)
+        if (payload && payload.titled > 0 && root.opened) root.runScan()
+      }
+    }
+  }
 
   Process {
     id: renameProc

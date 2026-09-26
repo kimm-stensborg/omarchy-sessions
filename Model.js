@@ -105,11 +105,11 @@ function highlightHtml(text, query, color) {
 }
 
 // The title worth showing, in the order a person would recognize it: a
-// name you gave it, then the tool's own, and only then the first line that
-// was typed.
+// name you gave it, then the tool's own, then one generated for a session
+// the tool never named, and only then the first line that was typed.
 function titleFrom(raw) {
   return oneLine(raw.customTitle) || oneLine(raw.aiTitle) || oneLine(raw.summary)
-    || oneLine(raw.generatedTitle) || oneLine(raw.title) || oneLine(raw.firstUser)
+    || oneLine(raw.generatedTitle) || oneLine(raw.title) || oneLine(raw.autoTitle) || oneLine(raw.firstUser)
 }
 
 function sessionFromRaw(raw, home) {

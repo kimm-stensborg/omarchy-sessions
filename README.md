@@ -26,9 +26,11 @@ The recent sessions on this machine, not the whole history: up to forty Claude t
 | Codex | `~/.codex/state_*.sqlite` | `codex resume <id>` |
 | Cursor | `~/.cursor/projects/<project>/agent-transcripts/` | `agent --resume <id>` |
 
-A session shows, in this order: a name you gave it, the title the tool generated (Cursor's comes from its chat's `meta.json`, skipping its "New Agent" placeholder), and only then the first line you typed. Claude and Cursor name the project folder by replacing slashes, and that name is turned back into a real path by matching it against directories that exist, so `omarchy-notes` stays one folder. The tool's own record of the directory wins when it has one.
+A session shows, in this order: a name you gave it, the title the tool generated (Cursor's comes from its chat's `meta.json`, skipping its "New Agent" placeholder), a title generated for it here, and only then the first line you typed. Claude and Cursor name the project folder by replacing slashes, and that name is turned back into a real path by matching it against directories that exist, so `omarchy-notes` stays one folder. The tool's own record of the directory wins when it has one.
 
 **Naming sessions.** F2 names the session in hand; an empty name gives it back its own title. A Claude session gets the same record Claude's `/rename` writes, so Claude's `/resume` shows the name too. Grok, Codex and Cursor have nowhere to put one, so their names are kept in `~/.local/state/omarchy/sessions/titles.json`.
+
+**Titles for untitled sessions.** Some sessions never get a title from their tool; Claude only titles a conversation once it gets going, so a one-prompt session like "pull" has none. When the panel finds such sessions it asks Claude's Haiku, through the `claude` CLI already signed in, for a short title from each one's first prompt and first answer: once, for all of them together, in the background, with no tools and no session saved. The titles are kept in the same `titles.json`, so each session is only named once. This sends those first lines to Anthropic and uses a little of your Claude allowance; without the `claude` CLI signed in, nothing is sent and the first prompt stays.
 
 At the foot of the panel, a strip of fixed height gives each subscription that has numbers a column, side by side, whichever tool is picked above; the list never moves as the numbers come in. Claude, Codex and Fireworks use the usage records Omarchy writes. Grok's column is the weekly allowance from the same billing figure `/usage` shows, and Cursor's the monthly plan from the same screen as `agent` `/usage`. A subscription with nothing recorded yet is left off the strip. Each allowance that renews gets its own line and meter, with when it renews: a countdown inside a day, the weekday and time inside a week, the date after that. Claude shows its week and, under it, its 5-hour session, so every column opens on its longest allowance. Clicking a column shows only that tool's sessions. Shares inside an allowance (Grok's Build and Chat, Cursor's Auto and API), the last seven days and the split by model are in the bar's popup, described below.
 
@@ -124,6 +126,7 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | `jq` | `install.sh`, when it checks which shortcuts are free |
 | `gio` (glib2) | moving a deleted session to the trash |
 | `herdr`, `tmux` | optional: opening sessions in them, and finding sessions running in their panes |
+| `claude` | optional: titles for sessions no tool has named |
 
 Grok's weekly figure and Cursor's monthly plan are fetched when the panel opens. Everything else is read from disk. `claude`, `grok`, `codex` and `agent` are only needed for the tools you actually resume.
 

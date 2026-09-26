@@ -134,13 +134,18 @@ def claude_raw(path):
     size = stat.st_size
     mtime_ms = int(stat.st_mtime * 1000)
 
+    first_reply = ""
+
     def take(record):
-        nonlocal cwd, first_user
+        nonlocal cwd, first_user, first_reply
         if not cwd and isinstance(record.get("cwd"), str):
             cwd = record["cwd"]
         field = title_fields.get(record.get("type"))
         if field and isinstance(record.get(field), str):
             titles[field] = one_line(record[field])
+        if first_user and not first_reply and record.get("type") == "assistant":
+            message = record.get("message")
+            first_reply = usable_text(message.get("content") if isinstance(message, dict) else "")
         if first_user or record.get("type") != "user":
             return
         message = record.get("message")
@@ -175,6 +180,7 @@ def claude_raw(path):
         "cwd": cwd,
         "updated": mtime_ms,
         "firstUser": first_user,
+        "firstReply": first_reply,
         "customTitle": titles["customTitle"],
         "aiTitle": titles["aiTitle"],
         "summary": titles["summary"],
@@ -835,21 +841,30 @@ def collect(home=None):
     for raw in sessions:
         if raw["id"] in titles["names"]:
             raw["customTitle"] = titles["names"][raw["id"]]
-    return {"sessions": sessions, "warnings": warnings}
+        if raw["id"] in titles["auto"]:
+            raw["autoTitle"] = titles["auto"][raw["id"]]
+    return {"sessions": sessions, "warnings": warnings,
+            "untitled": len(untitled(sessions))}
 
 
 # ---------------------------------------------------------------- titles
+
+# The fields in which a tool, or you, named a session. A session with none of
+# them shows its first prompt, and is what `autotitle` is for.
+TITLE_FIELDS = ("customTitle", "aiTitle", "summary", "generatedTitle", "title", "autoTitle")
+
 
 def titles_path(home=None):
     return state_dir(Path(home) if home else home_dir()) / "omarchy" / "sessions" / "titles.json"
 
 
 def read_titles(path):
-    """Names given in the panel, {session id: title}, under `names`."""
+    """Names given in the panel (`names`) and names generated for sessions
+    no tool had named (`auto`), each {session id: title}."""
     data = read_json(path)
     data = data if isinstance(data, dict) else {}
     out = {}
-    for key in ("names",):
+    for key in ("names", "auto"):
         entries = data.get(key) if isinstance(data.get(key), dict) else {}
         out[key] = {str(k): str(v) for k, v in entries.items() if isinstance(v, str) and v}
     return out
@@ -861,6 +876,10 @@ def write_titles(titles, path):
     partial = path.with_suffix(".tmp")
     partial.write_text(json.dumps(titles, indent=2, sort_keys=True, ensure_ascii=False), encoding="utf-8")
     partial.replace(path)
+
+
+def untitled(sessions):
+    return [raw for raw in sessions if not any(raw.get(field) for field in TITLE_FIELDS)]
 
 
 def rename_session(tool, session_id, title, home=None, path=None):
@@ -892,6 +911,71 @@ def rename_session(tool, session_id, title, home=None, path=None):
         titles["names"].pop(session_id, None)
     write_titles(titles, path)
     return {"ok": True}
+
+
+AUTOTITLE_LIMIT = 12
+AUTOTITLE_PROMPT = (
+    "You name chat sessions. Each input line is a session: its id, a tab, then the start of a "
+    "coding session (the first prompt, and the first answer after '=>'). Reply with exactly one "
+    "line per session and nothing else, in the form <id><TAB><title>: the id copied as given, one "
+    "tab, then a title of 2 to 6 words that says what the session is about, in the language of "
+    "the prompt, no quotes, no punctuation at the end."
+)
+
+
+def autotitle(home=None, path=None, ask=None, sessions=None):
+    """Titles for sessions no tool has named, from a small model, asked once
+    for all of them and kept, so each session is named only once.
+
+    The model is Claude's Haiku through the `claude` CLI already signed in on
+    this machine, with no tools and no session saved, run from a folder of
+    the plugin's own so no project gets a trace of it."""
+    home = Path(home) if home else home_dir()
+    path = path or titles_path(home)
+    sessions = sessions if sessions is not None else collect(home)["sessions"]
+    wanted = [raw for raw in untitled(sessions) if raw.get("firstUser")][:AUTOTITLE_LIMIT]
+    if not wanted:
+        return {"ok": True, "titled": 0}
+    lines = []
+    for raw in wanted:
+        text = one_line(raw["firstUser"], 400)
+        if raw.get("firstReply"):
+            text += " => " + one_line(raw["firstReply"], 300)
+        lines.append(raw["id"] + "\t" + text.replace("\t", " "))
+    answer = (ask or ask_haiku)("\n".join(lines))
+    if answer is None:
+        return {"ok": False, "error": "could not ask for titles"}
+    known = {raw["id"] for raw in wanted}
+    titles = read_titles(path)
+    added = 0
+    for line in answer.splitlines():
+        # The id first and the title last: a model sometimes repeats part of
+        # the prompt in between.
+        fields = [field.strip() for field in line.strip().split("\t")]
+        session_id, title = fields[0], fields[-1] if len(fields) > 1 else ""
+        title = one_line(title.strip('"\'').rstrip("."), 60)
+        if session_id in known and title:
+            titles["auto"][session_id] = title
+            added += 1
+    if added:
+        write_titles(titles, path)
+    return {"ok": True, "titled": added}
+
+
+def ask_haiku(text):
+    if shutil.which("claude") is None:
+        return None
+    workdir = Path(os.environ.get("XDG_CACHE_HOME") or str(home_dir() / ".cache")) / "omarchy" / "sessions"
+    workdir.mkdir(parents=True, exist_ok=True)
+    try:
+        completed = subprocess.run(
+            ["claude", "-p", "--model", "haiku", "--no-session-persistence", "--tools", "",
+             "--system-prompt", AUTOTITLE_PROMPT],
+            input=text, cwd=workdir, check=False, capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return completed.stdout if completed.returncode == 0 else None
 
 
 CURSOR_CONVERSATION_RE = re.compile(r'"conversationId"\s*:\s*"([^"]+)"')
@@ -1493,6 +1577,7 @@ def main(argv):
         "open": lambda: open_session(args[0], args[1], args[2], args[3], args[4:]),
         # rename <tool> <id> <title>  -- an empty title takes the name away
         "rename": lambda: rename_session(*(args[:3] + ["", "", ""])[:3]),
+        "autotitle": autotitle,
         # remember <id>=<app> ...
         "remember": lambda: remember_apps(args),
         "set-default": lambda: set_default_app(args[0] if args else ""),

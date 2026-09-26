@@ -58,6 +58,11 @@ const raw = [
 const sessions = M.normalize(raw, HOME)
 check("drops empty titles and incomplete records, newest first", sessions.map(s => s.id), ["g1", "c1", "x1", "u1"])
 check("a generated title wins over the first line", sessions[1].title, "Overlap")
+check("an auto title stands in for a missing one, and gives way to the tool's", [
+  M.titleFrom({ firstUser: "pull", autoTitle: "Repository up to date" }),
+  M.titleFrom({ firstUser: "pull", autoTitle: "Repository up to date", aiTitle: "Git pull" }),
+  M.titleFrom({ firstUser: "pull", autoTitle: "Repository up to date", customTitle: "Mine" })
+], ["Repository up to date", "Git pull", "Mine"])
 check("cursor without a directory keeps the fallback name", sessions[3].project, "kvittering")
 
 check("headers follow the newest session in each folder", M.rows(sessions, "", "", NOW, HOME).rows.filter(r => r.kind === "header").map(r => r.project),

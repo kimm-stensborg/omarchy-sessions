@@ -456,6 +456,30 @@ class Titles(unittest.TestCase):
             self.assertEqual(scan.read_titles(path)["names"], {})
             self.assertFalse(scan.rename_session("grok", "../x", "t", tmp, path)["ok"])
 
+    def test_autotitle_asks_once_for_the_untitled_and_keeps_the_answers(self):
+        sessions = [
+            {"tool": "claude", "id": "s-untitled-1", "firstUser": "pull", "firstReply": "Nothing new."},
+            {"tool": "claude", "id": "s-titled-01", "firstUser": "x", "aiTitle": "Named"},
+            {"tool": "cursor", "id": "s-untitled-2", "firstUser": "where\tis it"},
+        ]
+        asked = []
+
+        def ask(text):
+            asked.append(text)
+            return 's-untitled-1\tpull\t"Repository up to date."\ns-untitled-2\tFind the receipt\nstranger\tIgnored\n'
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "titles.json"
+            result = scan.autotitle(tmp, path, ask, sessions)
+            titles = scan.read_titles(path)["auto"]
+        self.assertEqual(result, {"ok": True, "titled": 2})
+        self.assertEqual(titles, {"s-untitled-1": "Repository up to date", "s-untitled-2": "Find the receipt"})
+        self.assertEqual(asked[0].splitlines(), ["s-untitled-1\tpull => Nothing new.", "s-untitled-2\twhere is it"])
+
+    def test_nothing_untitled_asks_nothing(self):
+        result = scan.autotitle("/nonexistent", "/nonexistent/t.json", lambda text: self.fail("asked"),
+                                [{"tool": "grok", "id": "g", "generatedTitle": "Named"}])
+        self.assertEqual(result, {"ok": True, "titled": 0})
 
 
 class CursorAllowance(unittest.TestCase):
