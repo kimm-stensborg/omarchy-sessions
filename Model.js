@@ -197,14 +197,17 @@ function relativeTime(updated, now) {
 // by its newest session, with its sessions newest first beneath it.
 // `cursor` counts only the sessions, in the order they are shown, which is
 // what the keyboard moves through. `running` marks the ids a window already has.
-function rows(sessions, query, tool, now, home, running) {
+// `folder`, when given, keeps only the sessions of that one folder.
+function rows(sessions, query, tool, now, home, running, folder) {
   var wanted = str(tool).trim()
+  var inFolder = str(folder).trim()
   var groups = []
   var groupOf = {}
   var matched = []
   var source = sessions || []
   for (var i = 0; i < source.length && matched.length < LIST_LIMIT; i++) {
     if (wanted && source[i].tool !== wanted) continue
+    if (inFolder && source[i].key !== inFolder) continue
     if (!matches(source[i], query)) continue
     matched.push(source[i])
     var key = source[i].key

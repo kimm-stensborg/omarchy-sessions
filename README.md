@@ -34,9 +34,11 @@ A session shows, in this order: a name you gave it, the title the tool generated
 
 At the foot of the panel, a strip of fixed height gives each subscription that has numbers a column, side by side, whichever tool is picked above; the list never moves as the numbers come in. Claude, Codex and Fireworks use the usage records Omarchy writes. Grok's column is the weekly allowance from the same billing figure `/usage` shows, and Cursor's the monthly plan from the same screen as `agent` `/usage`. A subscription with nothing recorded yet is left off the strip. Each allowance that renews gets its own line and meter, with when it renews: a countdown inside a day, the weekday and time inside a week, the date after that. Claude shows its week and, under it, its 5-hour session, so every column opens on its longest allowance. Clicking a column shows only that tool's sessions. Shares inside an allowance (Grok's Build and Chat, Cursor's Auto and API), the last seven days and the split by model are in the bar's popup, described below.
 
-## Starting a session
+## Starting a session, and one workspace at a time
 
 Ctrl+Enter asks for a tool and a workspace, then starts a new conversation there in the default app. It starts on the tool and folder of the session in hand; the tools offered are the installed ones (`claude`, `grok`, `codex`, and `agent` for Cursor). The workspaces are every folder a session was held in, newest first, with a dot for each tool used there. Typing narrows them by name and path, every word has to match; the arrows move through them, ←/→ or Tab switch tool, Enter starts, and Esc clears what was typed, then cancels.
+
+Ctrl+F uses the same list to narrow the panel to one workspace: pick it and only its sessions show, with a chip at the right saying which. Clicking a folder's header does the same, and clicking it again lets go; so do the chip, "All workspaces" at the top of the list, and Esc once the search line is empty. It combines with the tool chips and with typing.
 
 ## Where sessions open
 
@@ -113,12 +115,14 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | Enter | Focus the terminal already running that session, or open it resumed where it was opened last (herdr, tmux or a terminal), else in the default. |
 | Shift+Enter | Choose where it opens: herdr, tmux or Terminal. The choice is remembered for that session; `d` in the chooser makes it the default. |
 | Ctrl+Enter | Start a new conversation: pick the tool and the workspace, those of the session in hand to start with. It opens in the default app. |
+| Ctrl+F | Show only one workspace's sessions, picked from a list you can type to narrow. |
 | F2 | Name that session. Enter saves, Esc cancels; an empty name gives it back its own title. |
 | Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted. |
 | Tab / Shift+Tab | Step to the next or previous chip: All, then each tool, and round again. |
 | Click a chip | Show only that tool's sessions. Click it again for all of them. |
 | Click a subscription at the foot | Same as its chip. |
-| Esc | Clear the line, or close the panel when the line is empty. |
+| Click a folder header | Show only that folder's sessions. Click it again for all of them. |
+| Esc | Clear the line, then the workspace, then close the panel. |
 
 ## Dependencies
 
@@ -150,7 +154,7 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 | `BarWidget.qml` | The bar button, its setting, the five-minute refresh, and the popup's key. |
 | `UsagePanel.qml` | The popup under the bar button. |
 | `RenameDialog.qml` | The F2 dialog: naming a session. |
-| `WorkspacePicker.qml` | The Ctrl+Enter dialog: a tool and a workspace for a new session. |
+| `WorkspacePicker.qml` | The Ctrl+Enter and Ctrl+F dialog: a tool and a workspace for a new session, or the workspace to show. |
 | `AppChooser.qml` | The Shift+Enter chooser: which app a session opens in. |
 | `UsageBand.qml` | The fixed-height strip of subscriptions at the foot of the Sessions panel. |
 | `Model.js` | Titles, grouping, search, the resume command, and which window is already that session. |

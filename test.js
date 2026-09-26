@@ -314,6 +314,7 @@ check("workspaces: each folder once, newest first, named like the headers", plac
 check("workspaces filter on name and path, every word", M.filterWorkspaces(places, "cas proj").map(w => w.cwd), ["/home/kimm/Projects/casino"])
 check("an empty filter keeps them all", M.filterWorkspaces(places, " ").length, 3)
 check("a workspace is found by folder", [M.workspaceIndex(places, "/work/casino"), M.workspaceIndex(places, "/nope")], [1, -1])
+check("rows narrowed to one folder", M.rows(spots, "", "", NOW, HOME, {}, "/home/kimm/Projects/casino").rows.filter(r => r.kind === "session").map(r => r.id), ["a", "c"])
 check("new sessions start with the installed tools", M.newTools({ tools: ["cursor", "claude"] }, spots).map(t => t.id), ["claude", "cursor"])
 check("without that, with the tools that have sessions", M.newTools({}, spots).map(t => t.id), ["claude", "grok", "codex"])
 

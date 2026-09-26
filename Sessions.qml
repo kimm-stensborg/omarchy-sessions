@@ -26,6 +26,8 @@ Item {
   property bool opened: false
   property string queryText: ""
   property string tool: ""
+  // The one folder the list is narrowed to, or "" for all of them.
+  property string folder: ""
   property int selected: 0
   property var sessions: []
   property var viewRows: []
@@ -85,6 +87,7 @@ Item {
     root.opened = true
     root.queryText = payload.query ? String(payload.query) : ""
     root.tool = payload.tool ? String(payload.tool) : ""
+    root.folder = payload.folder ? String(payload.folder) : ""
     root.selected = 0
     root.statusMessage = ""
     root.sessions = []
@@ -142,7 +145,7 @@ Item {
     if (!stillThere && root.sessions.length > 0) root.tool = ""
     root.chips = chips
     var built = Model.rows(root.sessions, root.queryText, root.tool, Date.now(), root.home,
-      Model.runningIds(root.sessions, root.clients, root.backgroundSessions))
+      Model.runningIds(root.sessions, root.clients, root.backgroundSessions), root.folder)
     root.viewRows = built.rows
     root.count = built.count
     if (root.selected >= root.count) root.selected = Math.max(0, root.count - 1)
@@ -310,7 +313,7 @@ Item {
   // own to start with.
   function startNew(row) {
     var tool = row ? row.tool : (root.tool || "claude")
-    var cwd = row ? row.cwd : ""
+    var cwd = row ? row.cwd : root.folder
     picker.show("new", Model.workspaces(root.sessions, root.home), cwd,
       Model.newTools(root.apps, root.sessions), tool)
   }
@@ -320,6 +323,19 @@ Item {
     picker.opened = false
     if (!argv) return
     root.openIn(root.apps.default, { cwd: cwd, title: Model.toolLabel(tool) }, argv, false)
+  }
+
+  // Ctrl+F: which folder the list shows, the one in hand to start with.
+  function chooseFolder() {
+    var cwd = root.folder || (root.current ? root.current.cwd : "")
+    picker.show("filter", Model.workspaces(root.sessions, root.home), cwd, [], "")
+  }
+
+  function showFolder(cwd) {
+    root.folder = cwd
+    root.selected = 0
+    pointerGate.reset()
+    root.refresh()
   }
 
   // Closed first, as for focusing: herdr and tmux bring their window
@@ -616,8 +632,12 @@ Item {
           } else if (event.key === Qt.Key_F2) {
             root.askRename(root.current)
             event.accepted = true
+          } else if (event.key === Qt.Key_F && (event.modifiers & Qt.ControlModifier)) {
+            root.chooseFolder()
+            event.accepted = true
           } else if (event.key === Qt.Key_Escape) {
             if (root.queryText) root.setQuery("")
+            else if (root.folder) root.showFolder("")
             else root.close()
             event.accepted = true
           } else if (event.key === Qt.Key_Up) {
@@ -786,6 +806,35 @@ Item {
             }
           }
 
+          // The workspace the list is narrowed to; a click (or Esc) lets go.
+          Rectangle {
+            id: folderChip
+            visible: root.folder !== ""
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            radius: root.cornerRadius
+            height: Math.max(Style.space(20), Style.font.caption + Style.space(8))
+            width: folderLabel.implicitWidth + Style.space(18)
+            color: root.selectedBackground
+            border.width: Style.normalBorderWidth
+            border.color: Util.alpha(root.accent, 0.55)
+
+            Text {
+              id: folderLabel
+              anchors.centerIn: parent
+              textFormat: Text.PlainText
+              text: "in " + Model.projectLabel(root.folder, root.home) + "  ×"
+              color: root.selectedText
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.showFolder("")
+            }
+          }
         }
 
         Item {
@@ -924,6 +973,14 @@ Item {
                 elide: Text.ElideRight
               }
 
+              // A folder's header narrows the list to it, and back again.
+              MouseArea {
+                anchors.fill: parent
+                enabled: sessionRow.header && !!sessionRow.entry.cwd
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.showFolder(root.folder ? "" : sessionRow.entry.cwd)
+              }
+
               MouseArea {
                 anchors.fill: parent
                 enabled: !sessionRow.header
@@ -962,7 +1019,7 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             visible: root.count === 0
             textFormat: Text.PlainText
-            text: root.scanning ? "Looking…" : (root.queryText || root.tool ? "Nothing matches" : "No sessions yet")
+            text: root.scanning ? "Looking…" : (root.queryText || root.tool || root.folder ? "Nothing matches" : "No sessions yet")
             color: root.foreground
             opacity: 0.65
             font.family: root.fontFamily
@@ -995,7 +1052,7 @@ Item {
         Text {
           width: parent.width
           textFormat: Text.PlainText
-          text: "enter resumes    shift+enter opens in…    ctrl+enter new    f2 renames    del deletes    tab tool    esc closes"
+          text: "enter resumes    shift+enter opens in…    ctrl+enter new    ctrl+f workspace    f2 renames    del deletes    tab tool    esc closes"
           color: root.foreground
           opacity: 0.35
           font.family: root.fontFamily
@@ -1017,7 +1074,8 @@ Item {
         onCanceled: root.finishRename()
       }
 
-      // Ctrl+Enter: the tool and workspace of a new session.
+      // Ctrl+Enter: the tool and workspace of a new session. Ctrl+F: the
+      // workspace the list shows.
       WorkspacePicker {
         id: picker
         anchors.fill: parent
