@@ -365,6 +365,18 @@ class Peeking(unittest.TestCase):
             self.assertFalse(scan.peek("claude", self.ID, home)["ok"])
 
 
+class Stopping(unittest.TestCase):
+    ID = "e1f5072c-e17c-4a1e-a411-0fb725ff1110"
+
+    def test_only_a_background_session_is_stopped_by_its_short_id(self):
+        ran = []
+        result = scan.stop_session(self.ID, "/tmp", background={self.ID: 42}, run=lambda c: ran.append(c) or True)
+        self.assertEqual([result["ok"], ran], [True, [["claude", "stop", "e1f5072c"]]])
+        self.assertFalse(scan.stop_session(self.ID, "/tmp", background={}, run=lambda c: ran.append(c))["ok"])
+        self.assertFalse(scan.stop_session("../x", "/tmp", background={}, run=lambda c: ran.append(c))["ok"])
+        self.assertEqual(len(ran), 1)
+
+
 class Forks(unittest.TestCase):
     def test_a_fork_does_not_keep_the_session_it_started_from_running(self):
         old = "/home/u/.claude/projects/p/f94a28db-a70f-4eb4-aa34-a39cc40c4399.jsonl"

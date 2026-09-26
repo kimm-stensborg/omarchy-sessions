@@ -1768,6 +1768,29 @@ def delete_session(tool, session_id, home=None, running=session_running, discard
     return {"ok": True, "removed": len(paths)}
 
 
+def stop_session(session_id, home=None, background=None, run=None):
+    """Stop a Claude session running in the background, which has no window
+    to close it in. Its conversation is kept, so it can be deleted after."""
+    home = Path(home) if home else home_dir()
+    if not SESSION_ID_RE.fullmatch(str(session_id or "")):
+        return {"ok": False, "error": "not a session id"}
+    running = background if background is not None else claude_background(home)
+    if session_id not in running:
+        return {"ok": False, "error": "not running in the background"}
+    command = ["claude", "stop", session_id[:8]]
+    if run is not None:
+        return {"ok": bool(run(command))}
+    if shutil.which("claude") is None:
+        return {"ok": False, "error": "claude is not installed"}
+    try:
+        completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "error": str(exc)}
+    if completed.returncode != 0:
+        return {"ok": False, "error": (completed.stderr or completed.stdout or "claude stop failed").strip()[:200]}
+    return {"ok": True}
+
+
 def codex_delete(session_id):
     if shutil.which("codex") is None:
         return {"ok": False, "error": "codex is not installed"}
@@ -1812,6 +1835,8 @@ def main(argv):
         "focus": lambda: focus(*(args[:5] or [""])),
         # delete <tool> <id>
         "delete": lambda: delete_session(*(args[:2] + ["", ""])[:2]),
+        # stop <id>  -- a Claude session running in the background
+        "stop": lambda: stop_session(args[0] if args else ""),
     }
     if command not in commands:
         return reply({"ok": False, "error": "unknown command"}, 1)

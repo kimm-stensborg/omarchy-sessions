@@ -291,6 +291,8 @@ Item {
   // DEL asks first; a session some process is still running is not offered
   // at all. scan.py checks again, across every process, before it deletes.
   property var pendingDelete: null
+  // The pending delete is a background session, to be stopped first.
+  property bool pendingStop: false
   // The visual rows of a deleted session folding away, and its id.
   property var folding: []
   property string foldingId: ""
@@ -298,7 +300,10 @@ Item {
 
   function askDelete(row) {
     if (!row) return
-    if (row.running) {
+    // A background session has no window to close it in: it is stopped
+    // first, after asking, and deleted with the next Del.
+    root.pendingStop = row.running && row.background
+    if (row.running && !row.background) {
       root.flash("Still running; close it first")
       return
     }
@@ -330,12 +335,19 @@ Item {
   function cancelDelete() {
     confirm.opened = false
     root.pendingDelete = null
+    root.pendingStop = false
   }
 
   function confirmDelete() {
     var row = root.pendingDelete
     confirm.opened = false
     if (!row) return
+    if (root.pendingStop) {
+      root.pendingStop = false
+      stopProc.command = root.scanCommand(["stop", row.id])
+      stopProc.running = true
+      return
+    }
     deleteProc.pending = row
     deleteProc.command = root.scanCommand(["delete", row.tool, row.id])
     deleteProc.running = true
@@ -686,6 +698,26 @@ Item {
     watchChanges: false
     atomicWrites: true
     printErrors: false
+  }
+
+  Process {
+    id: stopProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var payload = root.parseJson(text)
+        root.pendingDelete = null
+        if (payload && payload.ok === true) {
+          root.flash("Stopped · del again deletes it")
+          // No longer in the background: look again.
+          root.runScan()
+          root.liveText = ""
+          root.pollLive()
+        } else {
+          root.flash(payload && payload.error ? String(payload.error) : "Could not stop it")
+        }
+      }
+    }
   }
 
   Process {
@@ -1222,12 +1254,20 @@ Item {
               // A pinned session is away from its folder, so it names it.
               Text {
                 id: rowFolder
-                visible: !sessionRow.header && sessionRow.entry && sessionRow.entry.pinned
+                visible: text !== ""
                 textFormat: Text.PlainText
                 anchors.right: rowTool.visible ? rowTool.left : rowWhen.left
                 anchors.rightMargin: Style.space(14)
                 anchors.verticalCenter: parent.verticalCenter
-                text: visible ? sessionRow.entry.project : ""
+                // A background session has no window: it says so.
+                text: {
+                  var entry = sessionRow.entry
+                  if (sessionRow.header || !entry) return ""
+                  var bits = []
+                  if (entry.pinned) bits.push(entry.project)
+                  if (entry.background) bits.push("background")
+                  return bits.join(" · ")
+                }
                 color: root.foreground
                 opacity: 0.4
                 font.family: root.fontFamily
@@ -1511,11 +1551,14 @@ Item {
         message: {
           var row = root.pendingDelete
           if (!row) return ""
+          if (root.pendingStop)
+            return "Stop \u201c" + row.title + "\u201d?\n"
+              + "It runs in the background, with no window. The conversation is kept; Del again deletes it."
           return "Delete \u201c" + row.title + "\u201d?\n"
             + (row.tool === "codex" ? "Codex deletes it for good." : "It goes to the trash.")
         }
         cancelText: "Cancel"
-        confirmText: "Delete"
+        confirmText: root.pendingStop ? "Stop" : "Delete"
         background: root.background
         foreground: root.foreground
         selectedBackground: root.selectedBackground

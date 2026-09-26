@@ -247,6 +247,7 @@ function rows(sessions, query, tool, now, home, running, folder, onlyRunning, st
         pinned: pinned,
         when: relativeTime(session.updated, now),
         running: !!(running && running[session.id]),
+        background: !!(running && running[session.id] === "background"),
         state: (states && states[session.id]) || ""
       })
       cursor += 1
@@ -346,7 +347,8 @@ function footerHints(row, query, pill, peeking) {
   if (pill === 1) return [["enter", "switches"], ["tab", "next"], ["esc", "back to the list"]]
   var hints = []
   if (str(query)) hints.push(["esc", "clears"])
-  if (row && row.running) hints.push(["enter", "focuses"])
+  if (row && row.background) hints.push(["enter", "attaches"], ["del", "stops"])
+  else if (row && row.running) hints.push(["enter", "focuses"])
   else if (row) hints.push(["enter", "resumes"], ["shift+enter", "opens in…"])
   if (peeking) hints.push(["←", "hides peek"])
   else if (row) hints.push(["→", "peek"])
@@ -612,8 +614,9 @@ function runningIds(sessions, clients, background) {
   var list = sessions || []
   var behind = background || []
   for (var i = 0; i < list.length; i++) {
-    if (behind.indexOf(list[i].id) !== -1 || (clients && clients.length && matchClient(list[i], clients)))
-      running[list[i].id] = true
+    // A background session runs with no window of its own, and says so.
+    if (behind.indexOf(list[i].id) !== -1) running[list[i].id] = "background"
+    else if (clients && clients.length && matchClient(list[i], clients)) running[list[i].id] = true
   }
   return running
 }

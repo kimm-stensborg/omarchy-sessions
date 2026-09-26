@@ -131,7 +131,7 @@ check("the pane a session runs in says which app it is in", [M.paneKindOf(sessio
 check("sessions found in panes are remembered when that is news", M.panesToRemember(sessions, inPanes, { sessions: { g1: "herdr" } }), ["c1=tmux"])
 
 const parked = [{ address: "0xa", text: "herdr\nc1\nx1", panes: [{ kind: "herdr", pane: "w9:p1", text: "claude\nc1\nx1" }] }]
-check("a background session counts as running even with no window", M.runningIds(sessions, [], ["u1"]), { u1: true })
+check("a background session counts as running even with no window", M.runningIds(sessions, [], ["u1"]), { u1: "background" })
 check("a background session is opened, not focused in the terminal that parked it",
   [M.windowFor(sessions[1], parked, ["c1"]), M.windowFor(sessions[2], parked, ["c1"]).address], [null, "0xa"])
 check("a background session is not remembered as living in that pane", M.panesToRemember(sessions, parked, {}, ["c1"]), ["x1=herdr"])
@@ -368,6 +368,10 @@ check("pinning puts it first, again takes it off", [M.togglePin(["a"], "b"), M.t
 check("kept pins are ids only", M.savedPins('{"pins":["aaaaaaaa-1", "../x", 5]}'), ["aaaaaaaa-1"])
 check("a session is found again by id", [M.cursorOf(pinnedRows, "a"), M.cursorOf(pinnedRows, "zz")], [2, -1])
 check("the foot says how to hide the peek", M.footerHints({ running: false }, "", -1, true).map(h => h[0]), ["enter", "shift+enter", "←", "ctrl+enter", "ctrl+?"])
+
+check("a background session is running with no window", M.rows(spots, "", "", NOW, HOME, M.runningIds(spots, [], ["c"])).rows.filter(r => r.id === "c").map(r => [r.running, r.background])[0], [true, true])
+
+check("a background session attaches and stops", M.footerHints({ running: true, background: true }, "").map(h => h.join(" ")).slice(0, 2), ["enter attaches", "del stops"])
 
 if (failures.length) {
   console.log(failures.join("\n"))

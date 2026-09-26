@@ -68,6 +68,8 @@ Ctrl+P pins the session in hand: it moves to a **Pinned** group at the top of th
 
 Del on a session asks first, naming it; Del or Enter deletes, Esc keeps it. A session that is still running cannot be deleted: the panel will not offer it, and before deleting `scan.py` looks again across every process on the machine, not only the ones in a window, so a session in a background pane or job is safe too. A session another one was forked from (Claude's `--fork-session`, as a background session does) is not counted as running just because the fork started from it.
 
+A Claude session running in the background has no window to close it in, and its row says **background**. Del on it offers to stop it instead (`claude stop`), which keeps the conversation; once it has stopped, Del deletes it as any other.
+
 A deleted session folds out of the list and the one above it is selected. The list stays scrolled where it was, so the selection keeps its place on screen and nothing slides under it before the next Del.
 
 | Tool | What goes |
@@ -137,7 +139,7 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | → / ← | Show the last messages of that session beside the list, or hide them. |
 | Ctrl+P | Pin that session to the top of the list, or unpin it. |
 | F2 | Name that session. Enter saves, Esc cancels; an empty name gives it back its own title. |
-| Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted. |
+| Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted; one running in the background is offered a stop instead. |
 | Tab / Shift+Tab | Move along the pills (tools, running, workspace) and back to the list. Enter opens or switches the one in hand, Esc goes back to the list. |
 | Click a subscription at the foot | Show only that tool's sessions. |
 | Click a folder header | Show only that folder's sessions. Click it again for all of them. |
