@@ -255,6 +255,23 @@ function toolsPresent(sessions) {
   return out
 }
 
+// What a deleted session leaves behind in the list: the rows to fold away
+// (its own, and its folder's header when it was the only one there) and
+// the session to select after, the one above it, else the new first. The
+// cursors below it close up by one, so the one above keeps its number.
+function afterRemoval(viewRows, id) {
+  var list = viewRows || []
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i]
+    if (row.kind !== "session" || row.id !== id) continue
+    var folding = [i]
+    var header = i > 0 ? list[i - 1] : null
+    if (header && header.kind === "header" && header.count === 1) folding.unshift(i - 1)
+    return { folding: folding, selected: Math.max(0, row.cursor - 1) }
+  }
+  return { folding: [], selected: 0 }
+}
+
 // Every folder a session was held in, newest first, once each: the
 // workspaces a new session can start in and the list can be narrowed to.
 // Named as the headers name them; `path` is the folder with ~ for home.

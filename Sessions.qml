@@ -257,6 +257,9 @@ Item {
   // DEL asks first; a session some process is still running is not offered
   // at all. scan.py checks again, across every process, before it deletes.
   property var pendingDelete: null
+  // The visual rows of a deleted session folding away, and its id.
+  property var folding: []
+  property string foldingId: ""
   property bool autotitleTried: false
 
   function askDelete(row) {
@@ -304,9 +307,30 @@ Item {
     deleteProc.running = true
   }
 
+  // A deleted session folds away and the one above it is selected. The list
+  // stays scrolled where it was, so the selection keeps its place on screen
+  // and the next Del doesn't land on something that slid under it.
+  function removeRow(id) {
+    var plan = Model.afterRemoval(root.viewRows, id)
+    root.selected = plan.selected
+    if (!plan.folding.length) {
+      root.forget(id)
+      return
+    }
+    root.foldingId = id
+    root.folding = plan.folding
+    foldTimer.restart()
+  }
+
   function forget(id) {
+    var y = resultList.contentY
+    root.folding = []
+    root.foldingId = ""
     root.sessions = root.sessions.filter(function(session) { return session.id !== id })
     root.refresh()
+    resultList.forceLayout()
+    resultList.contentY = Math.max(0, Math.min(y, resultList.contentHeight - resultList.height))
+    if (root.count > 0) resultList.positionViewAtIndex(root.visualOf(root.selected), ListView.Contain)
   }
 
   // A new conversation: a tool and a workspace are asked for, the row's
@@ -493,7 +517,7 @@ Item {
         var payload = root.parseJson(text)
         root.pendingDelete = null
         if (payload && payload.ok === true && row) {
-          root.forget(row.id)
+          root.removeRow(row.id)
           root.flash(row.tool === "codex" ? "Deleted" : "Moved to the trash")
         } else {
           root.flash(payload && payload.error ? String(payload.error) : "Could not delete it")
@@ -515,6 +539,12 @@ Item {
   }
 
   Process { id: rememberProc }
+
+  Timer {
+    id: foldTimer
+    interval: 200
+    onTriggered: root.forget(root.foldingId)
+  }
 
   Process {
     id: autotitleProc
@@ -610,6 +640,11 @@ Item {
         Keys.onPressed: function(event) {
           // While asking, DEL or Enter deletes and Esc cancels; nothing else
           // reaches the list or the search line.
+          // Nothing moves while a deleted row folds away.
+          if (root.folding.length) {
+            event.accepted = true
+            return
+          }
           if (picker.opened) {
             picker.handleKey(event)
             event.accepted = true
@@ -860,9 +895,14 @@ Item {
               readonly property var entry: root.viewRows[index]
               readonly property bool header: entry && entry.kind === "header"
               readonly property bool hasCursor: entry && entry.kind === "session" && entry.cursor === root.selected
+              readonly property bool folding: root.folding.indexOf(index) !== -1
 
               width: ListView.view.width
-              height: sessionRow.header ? root.headerRowHeight : root.rowHeight
+              height: sessionRow.folding ? 0 : (sessionRow.header ? root.headerRowHeight : root.rowHeight)
+              opacity: sessionRow.folding ? 0 : 1
+              clip: sessionRow.folding
+              Behavior on height { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+              Behavior on opacity { NumberAnimation { duration: 140 } }
               radius: root.cornerRadius
               color: sessionRow.hasCursor ? root.selectedBackground : "transparent"
 

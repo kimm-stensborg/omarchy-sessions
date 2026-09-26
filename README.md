@@ -54,6 +54,8 @@ A Claude session running in the background (one Claude parked as a background jo
 
 Del on a session asks first, naming it; Del or Enter deletes, Esc keeps it. A session that is still running cannot be deleted: the panel will not offer it, and before deleting `scan.py` looks again across every process on the machine, not only the ones in a window, so a session in a background pane or job is safe too.
 
+A deleted session folds out of the list and the one above it is selected. The list stays scrolled where it was, so the selection keeps its place on screen and nothing slides under it before the next Del.
+
 | Tool | What goes |
 |------|-----------|
 | Claude | the transcript, its subagent folder, and its file history, session environment and todos, to the trash |

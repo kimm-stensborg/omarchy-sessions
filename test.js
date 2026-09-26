@@ -327,6 +327,12 @@ check("no new workspace for one already listed, nothing typed, or ..", [
 check("a new workspace is made before opening", M.openArgs("herdr", { cwd: "/p/x", title: "Claude", create: true }, ["claude"], false),
   ["open", "--create", "herdr", "/p/x", "Claude", "-", "claude"])
 
+const shownRows = M.rows(spots, "", "", NOW, HOME, {}).rows
+check("a deleted session folds away and the one above is selected", M.afterRemoval(shownRows, "c"), { folding: [2], selected: 0 })
+check("the only session in a folder takes its header along", M.afterRemoval(shownRows, "b"), { folding: [3, 4], selected: 1 })
+check("deleting the first selects the new first", M.afterRemoval(shownRows, "a").selected, 0)
+check("a session no longer listed folds nothing", M.afterRemoval(shownRows, "zz"), { folding: [], selected: 0 })
+
 if (failures.length) {
   console.log(failures.join("\n"))
   console.log(failures.length + " failed, " + (checks - failures.length) + " ok")
