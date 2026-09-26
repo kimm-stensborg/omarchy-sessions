@@ -38,7 +38,7 @@ At the foot of the panel, a strip of fixed height gives each subscription that h
 
 Ctrl+Enter asks for a tool and a workspace, then starts a new conversation there in the default app. It starts on the tool and folder of the session in hand; the tools offered are the installed ones (`claude`, `grok`, `codex`, and `agent` for Cursor). The workspaces are every folder a session was held in, newest first, with a dot for each tool used there. Typing narrows them by name and path, every word has to match; the arrows move through them, ←/→ or Tab switch tool, Enter starts, and Esc clears what was typed, then cancels. A workspace that isn't there yet is made by typing it: what was typed is offered last as "+ new", a plain name in the folder most of your workspaces sit in (typically `~/Projects`), a path starting with `~` or `/` as it is. Its folder is made when the session starts, and herdr gives it a workspace of its own.
 
-Ctrl+F uses the same list to narrow the panel to one workspace: pick it and only its sessions show, with a chip at the right saying which. Clicking a folder's header does the same, and clicking it again lets go; so do the chip, "All workspaces" at the top of the list, and Esc once the search line is empty. It combines with the tool chips and with typing.
+Ctrl+F uses the same list to narrow the panel to one workspace: pick it and only its sessions show, with a chip at the right saying which. Clicking a folder's header does the same, and clicking it again lets go; so do the chip, "All workspaces" at the top of the list, and Esc once the search line is empty. It combines with the tool chips and with typing. The **Running** chip after the tools (or Ctrl+R) likewise shows only the sessions already running, those with a dot, background sessions included, and combines with all of these.
 
 ## Where sessions open
 
@@ -118,13 +118,14 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | Shift+Enter | Choose where it opens: herdr, tmux or Terminal. The choice is remembered for that session; `d` in the chooser makes it the default. |
 | Ctrl+Enter | Start a new conversation: pick the tool and the workspace, those of the session in hand to start with, or type a new workspace's name. It opens in the default app. |
 | Ctrl+F | Show only one workspace's sessions, picked from a list you can type to narrow. |
+| Ctrl+R | Show only the running sessions, or all of them again. Same as the Running chip. |
 | F2 | Name that session. Enter saves, Esc cancels; an empty name gives it back its own title. |
 | Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted. |
 | Tab / Shift+Tab | Step to the next or previous chip: All, then each tool, and round again. |
 | Click a chip | Show only that tool's sessions. Click it again for all of them. |
 | Click a subscription at the foot | Same as its chip. |
 | Click a folder header | Show only that folder's sessions. Click it again for all of them. |
-| Esc | Clear the line, then the workspace, then close the panel. |
+| Esc | Clear the line, then the workspace, then the running filter, then close the panel. |
 
 ## Dependencies
 

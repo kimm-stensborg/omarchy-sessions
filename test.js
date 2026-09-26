@@ -333,6 +333,9 @@ check("the only session in a folder takes its header along", M.afterRemoval(show
 check("deleting the first selects the new first", M.afterRemoval(shownRows, "a").selected, 0)
 check("a session no longer listed folds nothing", M.afterRemoval(shownRows, "zz"), { folding: [], selected: 0 })
 
+check("only the running ones", M.rows(spots, "", "", NOW, HOME, { c: true, d: true }, "", true).rows.map(r => r.kind === "header" ? r.project : r.id),
+  ["casino", "c", "Home", "d"])
+
 if (failures.length) {
   console.log(failures.join("\n"))
   console.log(failures.length + " failed, " + (checks - failures.length) + " ok")

@@ -28,6 +28,8 @@ Item {
   property string tool: ""
   // The one folder the list is narrowed to, or "" for all of them.
   property string folder: ""
+  // Only the sessions already running, toggled with Ctrl+R or its chip.
+  property bool runningOnly: false
   property int selected: 0
   property var sessions: []
   property var viewRows: []
@@ -88,6 +90,7 @@ Item {
     root.queryText = payload.query ? String(payload.query) : ""
     root.tool = payload.tool ? String(payload.tool) : ""
     root.folder = payload.folder ? String(payload.folder) : ""
+    root.runningOnly = payload.running === true
     root.selected = 0
     root.statusMessage = ""
     root.sessions = []
@@ -145,7 +148,7 @@ Item {
     if (!stillThere && root.sessions.length > 0) root.tool = ""
     root.chips = chips
     var built = Model.rows(root.sessions, root.queryText, root.tool, Date.now(), root.home,
-      Model.runningIds(root.sessions, root.clients, root.backgroundSessions), root.folder)
+      Model.runningIds(root.sessions, root.clients, root.backgroundSessions), root.folder, root.runningOnly)
     root.viewRows = built.rows
     root.count = built.count
     if (root.selected >= root.count) root.selected = Math.max(0, root.count - 1)
@@ -353,6 +356,13 @@ Item {
   function chooseFolder() {
     var cwd = root.folder || (root.current ? root.current.cwd : "")
     picker.show("filter", Model.workspaces(root.sessions, root.home), cwd, [], "")
+  }
+
+  function showRunning(on) {
+    root.runningOnly = on
+    root.selected = 0
+    pointerGate.reset()
+    root.refresh()
   }
 
   function showFolder(cwd) {
@@ -667,12 +677,16 @@ Item {
           } else if (event.key === Qt.Key_F2) {
             root.askRename(root.current)
             event.accepted = true
+          } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
+            root.showRunning(!root.runningOnly)
+            event.accepted = true
           } else if (event.key === Qt.Key_F && (event.modifiers & Qt.ControlModifier)) {
             root.chooseFolder()
             event.accepted = true
           } else if (event.key === Qt.Key_Escape) {
             if (root.queryText) root.setQuery("")
             else if (root.folder) root.showFolder("")
+            else if (root.runningOnly) root.showRunning(false)
             else root.close()
             event.accepted = true
           } else if (event.key === Qt.Key_Up) {
@@ -837,6 +851,49 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: if (chip.entry) root.setTool(chip.entry.id)
                 }
+              }
+            }
+
+            // Only what is running: a chip of its own, apart from the tools.
+            Item { width: Style.space(8); height: 1 }
+
+            Rectangle {
+              id: runningChip
+              radius: root.cornerRadius
+              height: Math.max(Style.space(20), Style.font.caption + Style.space(8))
+              width: runningLabel.implicitWidth + runningMark.width + Style.space(24)
+              color: root.runningOnly ? root.selectedBackground : "transparent"
+              border.width: Style.normalBorderWidth
+              border.color: root.runningOnly ? Util.alpha(root.accent, 0.55) : Util.alpha(root.borderColor, 0.28)
+
+              Rectangle {
+                id: runningMark
+                width: Style.space(6)
+                height: width
+                radius: width / 2
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(9)
+                anchors.verticalCenter: parent.verticalCenter
+                color: root.runningColor
+              }
+
+              Text {
+                id: runningLabel
+                textFormat: Text.PlainText
+                anchors.left: runningMark.right
+                anchors.leftMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Running"
+                color: root.runningOnly ? root.selectedText : root.foreground
+                opacity: root.runningOnly ? 1 : 0.55
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.showRunning(!root.runningOnly)
               }
             }
           }
@@ -1059,7 +1116,9 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             visible: root.count === 0
             textFormat: Text.PlainText
-            text: root.scanning ? "Looking…" : (root.queryText || root.tool || root.folder ? "Nothing matches" : "No sessions yet")
+            text: root.scanning ? "Looking…"
+              : root.runningOnly && !root.queryText ? "Nothing running"
+              : (root.queryText || root.tool || root.folder || root.runningOnly ? "Nothing matches" : "No sessions yet")
             color: root.foreground
             opacity: 0.65
             font.family: root.fontFamily
@@ -1092,7 +1151,7 @@ Item {
         Text {
           width: parent.width
           textFormat: Text.PlainText
-          text: "enter resumes    shift+enter opens in…    ctrl+enter new    ctrl+f workspace    f2 renames    del deletes    tab tool    esc closes"
+          text: "enter resumes    shift+enter opens in…    ctrl+enter new    ctrl+f workspace    ctrl+r running    f2 renames    del deletes    tab tool    esc closes"
           color: root.foreground
           opacity: 0.35
           font.family: root.fontFamily
