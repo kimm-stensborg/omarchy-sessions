@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.kimm-stensborg.sessions",
   "name": "Sessions",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Kimm Stensborg",
   "license": "MIT",
   "description": "Find a Claude, Grok, Codex or Cursor session and resume it, and every AI subscription's usage in the bar",
