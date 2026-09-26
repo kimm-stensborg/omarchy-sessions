@@ -314,6 +314,53 @@ function matchPane(session, client) {
   return null
 }
 
+// ---------------------------------------------------------------- opening
+
+var APP_LABELS = { herdr: "herdr", tmux: "tmux", terminal: "Terminal" }
+
+// Where a session opens: where it was opened last, when that app is still
+// installed; else the default; else a plain terminal.
+function appFor(session, apps) {
+  var available = (apps && apps.available) || ["terminal"]
+  var remembered = session && apps && apps.sessions ? apps.sessions[session.id] : ""
+  if (remembered && available.indexOf(remembered) !== -1) return remembered
+  if (apps && apps.default && available.indexOf(apps.default) !== -1) return apps.default
+  return "terminal"
+}
+
+function appChoices(apps) {
+  var available = (apps && apps.available) || ["terminal"]
+  var out = []
+  for (var i = 0; i < available.length; i++) out.push({ id: available[i], label: APP_LABELS[available[i]] || available[i] })
+  return out
+}
+
+// The arguments for `scan.py open`: the app, the folder, a title for the
+// tab, the session to remember it for (or "-") and what to run.
+function openArgs(app, row, argv, remember) {
+  return ["open", app, (row && row.cwd) || "", (row && row.title) || "", remember && row && row.id ? row.id : "-"].concat(argv || [])
+}
+
+// "herdr" or "tmux" when the session runs in one of their panes, else "".
+function paneKindOf(session, clients) {
+  var client = matchClient(session, clients)
+  var pane = client ? matchPane(session, client) : null
+  return pane && pane.kind ? pane.kind : ""
+}
+
+// `id=app` for each session found running in a herdr or tmux pane that is
+// not yet remembered that way, so sessions started by hand are remembered.
+function panesToRemember(sessions, clients, apps) {
+  var out = []
+  var list = sessions || []
+  var known = (apps && apps.sessions) || {}
+  for (var i = 0; i < list.length; i++) {
+    var kind = paneKindOf(list[i], clients)
+    if (kind && known[list[i].id] !== kind) out.push(list[i].id + "=" + kind)
+  }
+  return out
+}
+
 // The sessions some window is already running, as { id: true }.
 function runningIds(sessions, clients) {
   var running = {}

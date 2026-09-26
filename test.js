@@ -109,6 +109,22 @@ check("resume commands", {
   cursor: ["agent", "--resume", "u1"]
 })
 
+const apps = { available: ["herdr", "tmux", "terminal"], default: "herdr", sessions: { c1: "terminal", x1: "zellij" } }
+check("a session opens where it was opened last", M.appFor(sessions[1], apps), "terminal")
+check("otherwise in the default, and a remembered app that is gone falls back to it",
+  [M.appFor(sessions[0], apps), M.appFor(sessions[2], apps)], ["herdr", "herdr"])
+check("with nothing installed but a terminal, a terminal", M.appFor(sessions[0], { available: ["terminal"], default: "herdr", sessions: {} }), "terminal")
+check("the chooser offers what is installed", M.appChoices(apps).map(a => a.label), ["herdr", "tmux", "Terminal"])
+check("open arguments name the folder, the title and the session to remember",
+  M.openArgs("herdr", sessions[1], ["claude", "--resume", "c1"], true),
+  ["open", "herdr", "/home/kimm/Projects/omarchy-notes", "Overlap", "c1", "claude", "--resume", "c1"])
+check("a new conversation is not remembered", M.openArgs("tmux", sessions[1], ["claude"], false)[4], "-")
+const inPanes = [{ address: "0x1", text: "herdr\ng1\nc1", panes: [
+  { kind: "herdr", pane: "w1:p1", text: "grok\ng1" }, { kind: "tmux", pane: "%3", text: "claude\nc1" }] }]
+check("the pane a session runs in says which app it is in", [M.paneKindOf(sessions[0], inPanes), M.paneKindOf(sessions[1], inPanes), M.paneKindOf(sessions[2], inPanes)],
+  ["herdr", "tmux", ""])
+check("sessions found in panes are remembered when that is news", M.panesToRemember(sessions, inPanes, { sessions: { g1: "herdr" } }), ["c1=tmux"])
+
 check("a new conversation starts the tool bare", ["claude", "grok", "codex", "cursor", "other"].map(M.newArgv),
   [["claude"], ["grok"], ["codex"], ["agent"], null])
 

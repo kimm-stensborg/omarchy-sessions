@@ -30,6 +30,16 @@ A generated title is shown when the tool wrote one. Otherwise the first line you
 
 At the foot of the panel, a strip of fixed height gives each subscription that has numbers a column, side by side, whichever tool is picked above; the list never moves as the numbers come in. Claude, Codex and Fireworks use the usage records Omarchy writes. Grok's column is the weekly allowance from the same billing figure `/usage` shows, and Cursor's the monthly plan from the same screen as `agent` `/usage`. A subscription with nothing recorded yet is left off the strip. Each allowance that renews gets its own line and meter, with when it renews: a countdown inside a day, the weekday and time inside a week, the date after that. Claude shows its week and, under it, its 5-hour session, so every column opens on its longest allowance. Clicking a column shows only that tool's sessions. Shares inside an allowance (Grok's Build and Chat, Cursor's Auto and API), the last seven days and the split by model are in the bar's popup, described below.
 
+## Where sessions open
+
+A session that is not running opens in **herdr**, **tmux** or a plain **Terminal**; only the installed ones are offered. It opens where it was opened last, and otherwise in the default, which is herdr when it is installed. Shift+Enter asks instead: pick an app with the arrows or Tab and Enter, and that session opens there from then on; `d` makes the highlighted one the default.
+
+- **herdr**: a new tab in the workspace named after the session's folder (herdr names its workspaces after folders), or a new workspace when there is none. The window holding herdr comes forward; with none open, a terminal running `herdr` is started first.
+- **tmux**: a new window in the tmux session a terminal is attached to, which then comes forward; with no tmux client attached, a new terminal with a new tmux session.
+- **Terminal**: a new window of your default terminal, as `xdg-terminal-exec` picks it.
+
+A session found running in a herdr or tmux pane is remembered there as well, so one started by hand opens there again next time. Sessions in tmux are brought forward in their pane, as herdr's are. What is remembered lives in `~/.local/state/omarchy/sessions/apps.json`.
+
 ## Deleting a session
 
 Del on a session asks first, naming it; Del or Enter deletes, Esc keeps it. A session that is still running cannot be deleted: the panel will not offer it, and before deleting `scan.py` looks again across every process on the machine, not only the ones in a window, so a session in a background pane or job is safe too.
@@ -92,8 +102,9 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 |-----|------|
 | Type | Narrows the list. Every word has to match the title, the folder or the tool. |
 | Up / Down | Move from the newest session towards the oldest and back. It stops at either end rather than wrapping round. Headers are skipped. |
-| Enter | Focus the terminal already running that session, or open one resumed there. |
-| Ctrl+Enter | Start a new conversation with that session's tool, in its folder. |
+| Enter | Focus the terminal already running that session, or open it resumed where it was opened last (herdr, tmux or a terminal), else in the default. |
+| Shift+Enter | Choose where it opens: herdr, tmux or Terminal. The choice is remembered for that session; `d` in the chooser makes it the default. |
+| Ctrl+Enter | Start a new conversation with that session's tool, in its folder, in the default app. |
 | Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted. |
 | Tab / Shift+Tab | Step to the next or previous chip: All, then each tool, and round again. |
 | Click a chip | Show only that tool's sessions. Click it again for all of them. |
@@ -109,6 +120,7 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | `xdg-terminal-exec`, `uwsm` | launching the resume command in the session's own scope |
 | `jq` | `install.sh`, when it checks which shortcuts are free |
 | `gio` (glib2) | moving a deleted session to the trash |
+| `herdr`, `tmux` | optional: opening sessions in them, and finding sessions running in their panes |
 
 Grok's weekly figure and Cursor's monthly plan are fetched when the panel opens. Everything else is read from disk. `claude`, `grok`, `codex` and `agent` are only needed for the tools you actually resume.
 
@@ -127,6 +139,7 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 | `Sessions.qml` | The panel: search line, chips and the session list. |
 | `BarWidget.qml` | The bar button, its setting, the five-minute refresh, and the popup's key. |
 | `UsagePanel.qml` | The popup under the bar button. |
+| `AppChooser.qml` | The Shift+Enter chooser: which app a session opens in. |
 | `UsageBand.qml` | The fixed-height strip of subscriptions at the foot of the Sessions panel. |
 | `Model.js` | Titles, grouping, search, the resume command, and which window is already that session. |
 | `scan.py` | Reading the four tools' session files, the usage cache, launching or focusing (herdr panes included), and deleting. |

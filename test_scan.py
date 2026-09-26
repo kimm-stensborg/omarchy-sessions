@@ -6,6 +6,7 @@ import os
 import time
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import scan
@@ -315,6 +316,108 @@ class Delete(unittest.TestCase):
         if not mine:
             self.skipTest("not run from inside a Claude session")
         self.assertTrue(scan.session_running(mine[0], Path.home()))
+
+
+class Opening(unittest.TestCase):
+    ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    def test_herdr_is_the_default_when_installed_and_a_choice_sticks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "apps.json"
+            everything = scan.apps_state(path, which=lambda name: "/usr/bin/" + name)
+            self.assertEqual([everything["available"], everything["default"]], [["herdr", "tmux", "terminal"], "herdr"])
+            bare = scan.apps_state(path, which=lambda name: None)
+            self.assertEqual([bare["available"], bare["default"]], [["terminal"], "terminal"])
+            scan.set_default_app("tmux", path)
+            scan.remember_apps([self.ID + "=terminal", "../x=herdr", self.ID[:-1] + "f=nano"], path)
+            state = scan.apps_state(path, which=lambda name: "/usr/bin/" + name)
+            self.assertEqual([state["default"], state["sessions"]], ["tmux", {self.ID: "terminal"}])
+            # A default that is no longer installed falls back.
+            self.assertEqual(scan.apps_state(path, which=lambda name: None)["default"], "terminal")
+
+    def herdr(self, workspaces):
+        calls = []
+
+        def run(command):
+            calls.append(command)
+            if command[1:3] == ["workspace", "list"]:
+                return {"result": {"workspaces": workspaces}}
+            if command[1:3] in (["tab", "create"], ["workspace", "create"]):
+                return {"result": {"root_pane": {"pane_id": "w9:p4"}}}
+            return {"result": {}}
+
+        result = scan.herdr_open("/home/kimm/Projects/omarchy-arcade", "Plugin improvements",
+                                 ["grok", "--cwd", "/home/kimm/My Projects", "--resume", "g1"],
+                                 run=run, window=lambda: "", spawn=lambda command: calls.append(command), wait=0,
+                                 succeeds=lambda command: calls.append(command) or True)
+        return result, calls
+
+    def test_herdr_opens_a_tab_in_the_folders_workspace(self):
+        result, calls = self.herdr([{"workspace_id": "w1", "label": "casino"}, {"workspace_id": "wD", "label": "omarchy-arcade"}])
+        self.assertTrue(result["ok"])
+        self.assertEqual(calls[-2][:5], ["herdr", "tab", "create", "--workspace", "wD"])
+        self.assertIn("--focus", calls[-2])
+        # One quoted line, since herdr types it into the pane's shell.
+        self.assertEqual(calls[-1], ["herdr", "pane", "run", "w9:p4",
+                                     "grok --cwd '/home/kimm/My Projects' --resume g1"])
+
+    def test_herdr_makes_the_workspace_when_the_folder_has_none(self):
+        result, calls = self.herdr([{"workspace_id": "w1", "label": "casino"}])
+        create = next(c for c in calls if c[1:3] == ["workspace", "create"])
+        self.assertEqual(create[create.index("--label") + 1], "omarchy-arcade")
+        self.assertTrue(result["ok"])
+
+    def test_with_no_herdr_window_a_terminal_running_herdr_starts(self):
+        _, calls = self.herdr([])
+        self.assertEqual(calls[0], ["uwsm-app", "--", "xdg-terminal-exec", "herdr"])
+
+    def test_tmux_opens_a_window_where_a_client_is_attached(self):
+        calls = []
+
+        def run(command):
+            calls.append(command)
+            if command[1] == "list-clients":
+                return 0, "4242\twork\n"
+            return 0, ""
+
+        result = scan.tmux_open("/tmp", "Fix it", ["claude", "--resume", self.ID], run=run, window=lambda: "")
+        self.assertTrue(result["ok"])
+        self.assertEqual(calls[-1], ["tmux", "new-window", "-t", "work:", "-c", "/tmp", "-n", "Fix it",
+                                     "claude --resume " + self.ID])
+
+    def test_tmux_without_a_client_opens_a_new_session_in_a_terminal(self):
+        spawned = []
+        result = scan.tmux_open("/tmp", "Fix it", ["codex", "resume", "x1"],
+                                run=lambda command: (1, ""), spawn=spawned.append)
+        self.assertTrue(result["ok"])
+        self.assertEqual(spawned[0][-7:], ["tmux", "new-session", "-c", "/tmp", "-n", "Fix it", "codex resume x1"])
+
+    def test_opening_remembers_the_app_for_the_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "apps.json"
+            result = scan.open_session("herdr", "/tmp", "t", self.ID, ["python3", "-c", "0"], path,
+                                       openers={"herdr": lambda: {"ok": True}})
+            self.assertTrue(result["ok"])
+            self.assertEqual(scan.read_apps(path)["sessions"], {self.ID: "herdr"})
+            scan.open_session("herdr", "/tmp", "t", "-", ["python3"], path, openers={"herdr": lambda: {"ok": True}})
+            self.assertEqual(len(scan.read_apps(path)["sessions"]), 1)
+
+    def test_a_tmux_pane_belongs_to_the_window_its_client_runs_in(self):
+        parents = {100: 1, 101: 100, 500: 1, 501: 500, 502: 501}
+        marks = {502: ["claude", "c-tmux"]}
+        panes = [{"kind": "tmux", "pane": "%3", "tab": "work:2", "workspace": "work", "shell": 501, "clients": [101]}]
+        found = scan.describe_windows([{"address": "0x1", "pid": 100}], parents, lambda pid: marks.get(pid, []), panes)[0]
+        self.assertEqual([(p["kind"], p["pane"], p["text"]) for p in found["panes"]], [("tmux", "%3", "claude\nc-tmux")])
+        self.assertIn("c-tmux", found["text"])
+
+    def test_tmux_panes_read_from_tmux(self):
+        answers = {
+            "list-panes": (0, "501\t%3\twork:2\twork\n601\t%7\tother:0\tother\n"),
+            "list-clients": (0, "101\twork\n"),
+        }
+        with unittest.mock.patch.object(scan.shutil, "which", return_value="/usr/bin/tmux"):
+            panes = scan.tmux_panes(run=lambda command: answers[command[1]])
+        self.assertEqual([(p["pane"], p["clients"]) for p in panes], [("%3", [101]), ("%7", [])])
 
 
 class CursorAllowance(unittest.TestCase):

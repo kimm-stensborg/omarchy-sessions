@@ -13,6 +13,7 @@ import fcntl
 import json
 import os
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -943,12 +944,57 @@ def herdr_panes():
         shell = details.get("shell_pid")
         if isinstance(shell, int) and shell > 0:
             panes.append({
+                "kind": "herdr",
                 "pane": str(pane["pane_id"]),
                 "tab": str(pane.get("tab_id") or ""),
                 "workspace": str(pane.get("workspace_id") or ""),
                 "shell": shell,
+                "clients": [],
             })
     return panes
+
+
+def tmux_panes(run=None):
+    """Every tmux pane with its shell pid and the pids of the clients attached
+    to its session. tmux's server is a daemon outside every window, so a pane
+    is found in a window through the client attached to it."""
+    if shutil.which("tmux") is None:
+        return []
+    run = run or run_text
+    code, listing = run(["tmux", "list-panes", "-a", "-F",
+                         "#{pane_pid}\t#{pane_id}\t#{session_name}:#{window_index}\t#{session_name}"])
+    if code != 0:
+        return []
+    code, attached = run(["tmux", "list-clients", "-F", "#{client_pid}\t#{client_session}"])
+    clients = {}
+    for line in attached.splitlines() if code == 0 else []:
+        pid, _, session = line.partition("\t")
+        if pid.isdigit():
+            clients.setdefault(session, []).append(int(pid))
+    panes = []
+    for line in listing.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 4 or not parts[0].isdigit():
+            continue
+        panes.append({
+            "kind": "tmux",
+            "pane": parts[1],
+            "tab": parts[2],
+            "workspace": parts[3],
+            "shell": int(parts[0]),
+            "clients": clients.get(parts[3], []),
+        })
+    return panes
+
+
+def run_text(command, timeout=5):
+    """(exit code, stdout) of a command, or (-1, "") when it cannot run."""
+    try:
+        completed = subprocess.run(command, check=False, capture_output=True, text=True,
+                                   timeout=timeout, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return -1, ""
+    return completed.returncode, completed.stdout
 
 
 def describe_windows(clients, parents, marks_of, panes=()):
@@ -958,9 +1004,10 @@ def describe_windows(clients, parents, marks_of, panes=()):
     children cannot be told apart by window, so such a pid only contributes
     its own command line.
 
-    A multiplexer's panes whose shell runs inside the window are listed on
-    it with their own marks, so a session can be brought forward in its pane
-    and not only its window.
+    A multiplexer's panes that run inside the window are listed on it with
+    their own marks, so a session can be brought forward in its pane and not
+    only its window: a herdr pane by its shell, a tmux pane by the client
+    attached to its session.
     """
     pids = [client.get("pid") for client in clients if isinstance(client, dict)]
     described = []
@@ -978,12 +1025,17 @@ def describe_windows(clients, parents, marks_of, panes=()):
             for member in tree:
                 marks.extend(marks_of(member))
             for pane in panes:
-                if pane["shell"] not in tree:
+                attached = [pid for pid in pane.get("clients") or [] if pid in tree]
+                if pane["shell"] not in tree and not attached:
                     continue
                 pane_marks = []
                 for member in process_tree(pane["shell"], parents):
                     pane_marks.extend(marks_of(member))
+                    # A tmux pane runs outside the window, so its marks count for the window too.
+                    if attached:
+                        marks.extend(marks_of(member))
                 inside.append({
+                    "kind": pane.get("kind", "herdr"),
                     "pane": pane["pane"],
                     "tab": pane["tab"],
                     "workspace": pane["workspace"],
@@ -999,10 +1051,12 @@ def window_clients(home=None):
     if not isinstance(clients, list):
         return []
     running = {**claude_running(home), **grok_running(home)}
-    return describe_windows(clients, process_parents(), lambda pid: process_marks(pid, running), herdr_panes())
+    return describe_windows(clients, process_parents(), lambda pid: process_marks(pid, running),
+                            herdr_panes() + tmux_panes())
 
 
-def launch(cwd, argv):
+def launch(cwd, argv, spawn=None):
+    """A new window of the desktop's terminal, in `cwd`, running `argv`."""
     if not argv:
         return {"ok": False, "error": "nothing to run"}
     binary = argv[0]
@@ -1013,7 +1067,10 @@ def launch(cwd, argv):
         command.append("--dir=" + cwd)
     command.extend(argv)
     try:
-        subprocess.Popen(command, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if spawn:
+            spawn(command)
+        else:
+            subprocess.Popen(command, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as exc:
         return {"ok": False, "error": str(exc)}
     return {"ok": True}
@@ -1029,10 +1086,18 @@ def focus_commands(address):
     ]
 
 
-def focus_pane(pane, tab, workspace):
-    """Bring a herdr pane forward: directly when herdr sees an agent in it,
-    otherwise by its workspace and tab."""
-    if shutil.which("herdr") is None or not pane:
+def focus_pane(kind, pane, tab, workspace):
+    """Bring a multiplexer's pane forward inside its window. A herdr pane
+    directly when herdr sees an agent in it, otherwise by workspace and tab;
+    a tmux pane by its window and then the pane."""
+    if not pane:
+        return False
+    if kind == "tmux":
+        if shutil.which("tmux") is None:
+            return False
+        ok = run_text(["tmux", "select-window", "-t", tab])[0] == 0 if tab else True
+        return run_text(["tmux", "select-pane", "-t", pane])[0] == 0 and ok
+    if shutil.which("herdr") is None:
         return False
     agent = run_json(["herdr", "agent", "focus", pane])
     if isinstance(agent, dict) and agent.get("result"):
@@ -1045,7 +1110,7 @@ def focus_pane(pane, tab, workspace):
     return ok and bool(workspace or tab)
 
 
-def focus(address, pane="", tab="", workspace=""):
+def focus(address, kind="", pane="", tab="", workspace=""):
     if not address or not re.fullmatch(r"0x[0-9a-fA-F]+", str(address)):
         return {"ok": False, "error": "not a window"}
     error = "could not focus that window"
@@ -1059,9 +1124,175 @@ def focus(address, pane="", tab="", workspace=""):
             # The window is forward either way; a pane that will not come
             # forward still leaves you in the right terminal.
             if pane:
-                focus_pane(pane, tab, workspace)
+                focus_pane(kind, pane, tab, workspace)
             return {"ok": True}
     return {"ok": False, "error": error}
+
+
+# ---------------------------------------------------------------- opening
+
+# Where a session can open, in the order the chooser offers them. A plain
+# terminal is always there; the others when installed.
+APPS = ("herdr", "tmux", "terminal")
+
+
+def apps_path():
+    return state_dir(home_dir()) / "omarchy" / "sessions" / "apps.json"
+
+
+def available_apps(which=shutil.which):
+    return [app for app in APPS if app == "terminal" or which(app) is not None]
+
+
+def read_apps(path=None):
+    data = read_json(path or apps_path())
+    data = data if isinstance(data, dict) else {}
+    sessions = data.get("sessions") if isinstance(data.get("sessions"), dict) else {}
+    return {
+        "default": str(data.get("default") or ""),
+        "sessions": {str(k): str(v) for k, v in sessions.items() if v in APPS},
+    }
+
+
+def write_apps(data, path=None):
+    path = Path(path or apps_path())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_suffix(".tmp")
+    partial.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    partial.replace(path)
+
+
+def apps_state(path=None, which=shutil.which):
+    """What the panel needs to pick an app: the installed ones, the default
+    (herdr when installed unless set otherwise) and each session's own."""
+    available = available_apps(which)
+    stored = read_apps(path)
+    default = stored["default"] if stored["default"] in available else available[0]
+    return {"available": available, "default": default, "sessions": stored["sessions"]}
+
+
+def remember_apps(pairs, path=None):
+    """Record `id=app` pairs: where each session was opened or found running."""
+    stored = read_apps(path)
+    changed = 0
+    for pair in pairs:
+        session_id, _, app = str(pair).partition("=")
+        if app in APPS and SESSION_ID_RE.fullmatch(session_id) and stored["sessions"].get(session_id) != app:
+            stored["sessions"][session_id] = app
+            changed += 1
+    if changed:
+        write_apps(stored, path)
+    return {"ok": True, "changed": changed}
+
+
+def set_default_app(app, path=None):
+    if app not in APPS:
+        return {"ok": False, "error": "unknown app"}
+    stored = read_apps(path)
+    stored["default"] = app
+    write_apps(stored, path)
+    return {"ok": True}
+
+
+def window_hosting(wanted, parents=None, clients=None):
+    """The address of the first window with a process inside it for which
+    `wanted(pid)` holds, or ""."""
+    parents = parents if parents is not None else process_parents()
+    clients = clients if clients is not None else run_json(["hyprctl", "clients", "-j"])
+    for client in clients if isinstance(clients, list) else []:
+        pid = client.get("pid") if isinstance(client, dict) else None
+        if not isinstance(pid, int) or pid <= 0:
+            continue
+        if any(wanted(member) for member in process_tree(pid, parents)):
+            return str(client.get("address") or "")
+    return ""
+
+
+def is_herdr_client(pid):
+    """A herdr client process: `herdr` itself, not its server."""
+    argv = process_cmdline(pid).split()
+    return bool(argv) and os.path.basename(argv[0]) == "herdr" and "server" not in argv[1:2]
+
+
+def herdr_open(cwd, title, argv, run=None, window=None, spawn=None, wait=5.0, succeeds=None):
+    """Open a session in herdr: a new tab in the workspace named after its
+    folder (herdr names workspaces after folders), or a new workspace when
+    there is none, then the window holding herdr comes forward. With no herdr
+    window open, a terminal running herdr is started first."""
+    run = run or run_json
+    # `pane run` answers with nothing but its exit status.
+    succeeds = succeeds or (lambda command: run_text(command)[0] == 0)
+    window = window or (lambda: window_hosting(is_herdr_client))
+    spawn = spawn or (lambda command: subprocess.Popen(command, start_new_session=True,
+                                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+    address = window()
+    if not address:
+        spawn(["uwsm-app", "--", "xdg-terminal-exec", "herdr"])
+        deadline = time.time() + wait
+        while not address and time.time() < deadline:
+            time.sleep(0.2)
+            address = window()
+    label = Path(cwd).name if cwd else "home"
+    workspaces = ((run(["herdr", "workspace", "list"]) or {}).get("result") or {}).get("workspaces") or []
+    match = next((w for w in workspaces if isinstance(w, dict) and w.get("label") == label), None)
+    if match:
+        created = run(["herdr", "tab", "create", "--workspace", str(match.get("workspace_id")),
+                       "--cwd", cwd or str(home_dir()), "--label", one_line(title, 30) or label, "--focus"])
+    else:
+        created = run(["herdr", "workspace", "create", "--cwd", cwd or str(home_dir()),
+                       "--label", label, "--focus"])
+    pane = (((created or {}).get("result") or {}).get("root_pane") or {}).get("pane_id")
+    if not pane:
+        return {"ok": False, "error": "herdr did not open a pane"}
+    # herdr types the command into the pane's shell, so it goes as one quoted line.
+    if not succeeds(["herdr", "pane", "run", str(pane), shlex.join(argv)]):
+        return {"ok": False, "error": "herdr could not run it"}
+    if address:
+        focus(address)
+    return {"ok": True}
+
+
+def tmux_open(cwd, title, argv, run=None, window=None, spawn=None):
+    """Open a session in tmux: a new window in the session a terminal is
+    attached to, which then comes forward, or else a new tmux session in a new
+    terminal."""
+    run = run or run_text
+    name = one_line(title, 30) or "session"
+    command = shlex.join(argv)
+    code, attached = run(["tmux", "list-clients", "-F", "#{client_pid}\t#{client_session}"])
+    first = attached.splitlines()[0].split("\t") if code == 0 and attached.strip() else []
+    if len(first) == 2 and first[0].isdigit():
+        code, _ = run(["tmux", "new-window", "-t", first[1] + ":", "-c", cwd or str(home_dir()), "-n", name, command])
+        if code != 0:
+            return {"ok": False, "error": "tmux could not open a window"}
+        client = int(first[0])
+        address = (window or (lambda: window_hosting(lambda pid: pid == client)))()
+        if address:
+            focus(address)
+        return {"ok": True}
+    return launch(cwd, ["tmux", "new-session", "-c", cwd or str(home_dir()), "-n", name, command], spawn=spawn)
+
+
+def open_session(app, cwd, title, session_id, argv, path=None, openers=None):
+    """Open a session in `app` and remember that for it."""
+    if not argv:
+        return {"ok": False, "error": "nothing to run"}
+    if shutil.which(argv[0]) is None and not Path(argv[0]).is_file():
+        return {"ok": False, "error": argv[0] + " is not installed"}
+    if openers is None:
+        if app not in available_apps():
+            return {"ok": False, "error": app + " is not installed"}
+        openers = {
+            "terminal": lambda: launch(cwd, argv),
+            "herdr": lambda: herdr_open(cwd, title, argv),
+            "tmux": lambda: tmux_open(cwd, title, argv),
+        }
+    if app not in openers:
+        return {"ok": False, "error": "unknown app"}
+    result = openers[app]()
+    if result.get("ok") and session_id and session_id != "-":
+        remember_apps([session_id + "=" + app], path)
+    return result
 
 
 # A session id as the tools write them: a UUID or something like it. Anything
@@ -1160,17 +1391,21 @@ def codex_delete(session_id):
 def main(argv):
     command = argv[1] if len(argv) > 1 else "list"
     args = argv[2:]
-    if command == "launch" and len(args) < 2:
-        # launch <cwd> <binary> [args...]  -- an empty cwd is passed as "".
-        return reply({"ok": False, "error": "usage: launch <cwd> <binary> [args...]"}, 1)
+    if command == "open" and len(args) < 5:
+        # open <app> <cwd> <title> <session-id|-> <argv...>  -- an empty cwd is "".
+        return reply({"ok": False, "error": "usage: open <app> <cwd> <title> <session-id|-> <argv...>"}, 1)
     commands = {
         "list": collect,
         # usage [--max-age <seconds>]
         "usage": lambda: cached_usage(float(args[1]) if args[:1] == ["--max-age"] and len(args) > 1 else None),
         "clients": window_clients,
-        "launch": lambda: launch(args[0], args[1:]),
-        # focus <address> [<pane> <tab> <workspace>]
-        "focus": lambda: focus(*(args[:4] or [""])),
+        "apps": apps_state,
+        "open": lambda: open_session(args[0], args[1], args[2], args[3], args[4:]),
+        # remember <id>=<app> ...
+        "remember": lambda: remember_apps(args),
+        "set-default": lambda: set_default_app(args[0] if args else ""),
+        # focus <address> [<kind> <pane> <tab> <workspace>]
+        "focus": lambda: focus(*(args[:5] or [""])),
         # delete <tool> <id>
         "delete": lambda: delete_session(*(args[:2] + ["", ""])[:2]),
     }

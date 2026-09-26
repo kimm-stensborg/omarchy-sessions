@@ -34,6 +34,9 @@ Item {
   property var usage: []
   // Open windows, as scan.py describes them, for marking what already runs.
   property var clients: []
+  // Where sessions open: the installed apps, the default and each session's
+  // own, from scan.py `apps`.
+  property var apps: ({ available: ["terminal"], default: "terminal", sessions: {} })
   property var themeColors: ({})
   readonly property color matchColor: root.themeColors.yellow || root.accent
   readonly property color runningColor: root.themeColors.green || root.accent
@@ -94,6 +97,9 @@ Item {
     runningProc.running = false
     runningProc.command = root.scanCommand(["clients"])
     runningProc.running = true
+    appsProc.running = false
+    appsProc.command = root.scanCommand(["apps"])
+    appsProc.running = true
   }
 
   function close() {
@@ -179,6 +185,7 @@ Item {
     }
     root.sessions = Model.normalize(payload.sessions, root.home)
     root.refresh()
+    root.rememberPanes()
     if (root.sessions.length === 0 && payload.warnings && payload.warnings.length > 0)
       root.statusMessage = String(payload.warnings[0])
   }
@@ -217,13 +224,16 @@ Item {
 
   // A terminal whose command line already carries this session comes
   // forward. Otherwise the tool is opened resumed, in that directory.
-  function resume(row) {
+  // `app` picks where it opens when it is not running already; without one
+  // it opens where it was opened last, or in the default.
+  function resume(row, app) {
     if (!row) return
     if (!Model.resumeArgv(row)) {
       root.flash("Can't resume this one")
       return
     }
     clientProc.pending = row
+    clientProc.app = app || ""
     clientProc.running = false
     clientProc.command = root.scanCommand(["clients"])
     clientProc.running = true
@@ -267,9 +277,54 @@ Item {
   function startNew(row) {
     var argv = row ? Model.newArgv(row.tool) : null
     if (!argv) return
-    actProc.command = root.scanCommand(["launch", row.cwd || ""].concat(argv))
+    root.openIn(root.apps.default, row, argv, false)
+  }
+
+  // Closed first, as for focusing: herdr and tmux bring their window
+  // forward, and the overlay letting go of the keyboard afterwards would hand
+  // focus straight back. What goes wrong after that is told as a notification.
+  function openIn(app, row, argv, remember) {
+    root.close()
+    if (remember) {
+      var sessions = Object.assign({}, root.apps.sessions)
+      sessions[row.id] = app
+      root.apps = Object.assign({}, root.apps, { sessions: sessions })
+    }
+    actProc.command = root.scanCommand(Model.openArgs(app, row, argv, remember))
     actProc.running = false
     actProc.running = true
+  }
+
+  function chooseApp(row) {
+    if (!row) return
+    if (row.running) {
+      root.resume(row)
+      return
+    }
+    chooser.title = row.title
+    chooser.pending = row
+    chooser.show(Model.appChoices(root.apps), Model.appFor(row, root.apps))
+  }
+
+  function makeDefault(app) {
+    root.apps = Object.assign({}, root.apps, { default: app })
+    defaultProc.command = root.scanCommand(["set-default", app])
+    defaultProc.running = true
+  }
+
+  // Sessions found running in a herdr or tmux pane are remembered there, so
+  // one started by hand opens there again too.
+  function rememberPanes() {
+    var pairs = Model.panesToRemember(root.sessions, root.clients, root.apps)
+    if (!pairs.length) return
+    var sessions = Object.assign({}, root.apps.sessions)
+    for (var i = 0; i < pairs.length; i++) {
+      var parts = pairs[i].split("=")
+      sessions[parts[0]] = parts[1]
+    }
+    root.apps = Object.assign({}, root.apps, { sessions: sessions })
+    rememberProc.command = root.scanCommand(["remember"].concat(pairs))
+    rememberProc.running = true
   }
 
   function resumeWithClients(clients) {
@@ -282,15 +337,15 @@ Item {
       root.close()
       var pane = Model.matchPane(row, hit)
       actProc.command = root.scanCommand(pane
-        ? ["focus", hit.address, pane.pane, pane.tab || "", pane.workspace || ""]
+        ? ["focus", hit.address, pane.kind || "herdr", pane.pane, pane.tab || "", pane.workspace || ""]
         : ["focus", hit.address])
-    } else {
-      var argv = Model.resumeArgv(row)
-      if (!argv) return
-      actProc.command = root.scanCommand(["launch", row.cwd || ""].concat(argv))
+      actProc.running = false
+      actProc.running = true
+      return
     }
-    actProc.running = false
-    actProc.running = true
+    var argv = Model.resumeArgv(row)
+    if (!argv) return
+    root.openIn(clientProc.app || Model.appFor(row, root.apps), row, argv, true)
   }
 
   Timer {
@@ -327,6 +382,7 @@ Item {
   Process {
     id: clientProc
     property var pending: null
+    property string app: ""
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -343,10 +399,13 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         var payload = root.parseJson(text)
-        var error = payload && payload.error ? payload.error : "Could not open it"
+        var error = payload && payload.error ? String(payload.error) : "Could not open it"
         if (payload && payload.ok === true) root.close()
         else if (root.opened) root.flash(error)
-        else console.warn(root.pluginId + ":", error)
+        else {
+          notifyProc.command = ["notify-send", "-a", "Sessions", "Sessions", error]
+          notifyProc.running = true
+        }
       }
     }
   }
@@ -385,6 +444,22 @@ Item {
     }
   }
 
+  Process {
+    id: appsProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var payload = root.parseJson(text)
+        if (payload && payload.available) root.apps = payload
+        root.rememberPanes()
+      }
+    }
+  }
+
+  Process { id: rememberProc }
+  Process { id: defaultProc }
+  Process { id: notifyProc }
+
   // The window scan Enter does, run once on opening so the list can show
   // which sessions are already running somewhere.
   Process {
@@ -394,6 +469,7 @@ Item {
       onStreamFinished: {
         root.clients = root.parseJson(text) || []
         root.refresh()
+        root.rememberPanes()
       }
     }
   }
@@ -453,6 +529,11 @@ Item {
         Keys.onPressed: function(event) {
           // While asking, DEL or Enter deletes and Esc cancels; nothing else
           // reaches the list or the search line.
+          if (chooser.opened) {
+            chooser.handleKey(event)
+            event.accepted = true
+            return
+          }
           if (confirm.opened) {
             if (event.key === Qt.Key_Delete) root.confirmDelete()
             else confirm.handleKey(event)
@@ -484,6 +565,7 @@ Item {
             event.accepted = true
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             if (event.modifiers & Qt.ControlModifier) root.startNew(root.current)
+            else if (event.modifiers & Qt.ShiftModifier) root.chooseApp(root.current)
             else root.resume(root.current)
             event.accepted = true
           } else if (event.key === Qt.Key_Backspace) {
@@ -839,12 +921,35 @@ Item {
         Text {
           width: parent.width
           textFormat: Text.PlainText
-          text: "enter resumes    ctrl+enter starts new    del deletes    tab switches tool    esc closes"
+          text: "enter resumes    shift+enter opens in…    ctrl+enter starts new    del deletes    tab switches tool    esc closes"
           color: root.foreground
           opacity: 0.35
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }
+      }
+
+      // Shift+Enter: which app a session opens in, remembered for it.
+      AppChooser {
+        id: chooser
+        property var pending: null
+        anchors.fill: parent
+        defaultId: root.apps.default
+        background: root.background
+        foreground: root.foreground
+        selectedBackground: root.selectedBackground
+        selectedText: root.selectedText
+        fontFamily: root.fontFamily
+        cornerRadius: root.cornerRadius
+        onPicked: function(id) {
+          chooser.opened = false
+          root.resume(chooser.pending, id)
+        }
+        onMadeDefault: function(id) {
+          root.makeDefault(id)
+          root.flash(Model.appChoices({ available: [id] })[0].label + " is the default")
+        }
+        onCanceled: chooser.opened = false
       }
 
       // Asked before a session is deleted. DEL or Enter deletes, Esc cancels.
