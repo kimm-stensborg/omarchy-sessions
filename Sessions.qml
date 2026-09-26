@@ -318,11 +318,11 @@ Item {
       Model.newTools(root.apps, root.sessions), tool)
   }
 
-  function startIn(tool, cwd) {
+  function startIn(tool, cwd, create) {
     var argv = Model.newArgv(tool)
     picker.opened = false
     if (!argv) return
-    root.openIn(root.apps.default, { cwd: cwd, title: Model.toolLabel(tool) }, argv, false)
+    root.openIn(root.apps.default, { cwd: cwd, title: Model.toolLabel(tool), create: create }, argv, false)
   }
 
   // Ctrl+F: which folder the list shows, the one in hand to start with.
@@ -1079,6 +1079,7 @@ Item {
       WorkspacePicker {
         id: picker
         anchors.fill: parent
+        home: root.home
         themeColors: root.themeColors
         background: root.background
         foreground: root.foreground
@@ -1087,7 +1088,7 @@ Item {
         accent: root.accent
         fontFamily: root.fontFamily
         cornerRadius: root.cornerRadius
-        onStarted: function(tool, cwd) { root.startIn(tool, cwd) }
+        onStarted: function(tool, cwd, create) { root.startIn(tool, cwd, create) }
         onChose: function(cwd) {
           picker.opened = false
           root.showFolder(cwd)

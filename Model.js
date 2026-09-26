@@ -310,6 +310,41 @@ function workspaceIndex(list, cwd) {
   return -1
 }
 
+// Where a new workspace goes when only a name is typed: the folder most
+// of the others sit in (~/Projects, typically), else home.
+function workspaceBase(list, home) {
+  var homePath = cleanPath(home)
+  var counts = {}
+  var best = ""
+  var items = list || []
+  for (var i = 0; i < items.length; i++) {
+    var cwd = cleanPath(items[i].cwd)
+    if (!cwd || cwd === homePath) continue
+    var parent = cwd.slice(0, cwd.lastIndexOf("/")) || "/"
+    counts[parent] = (counts[parent] || 0) + 1
+    if (!best || counts[parent] > counts[best]) best = parent
+  }
+  return best || homePath
+}
+
+// A workspace to make from what was typed: a name goes in the base folder,
+// a path starting with ~ or / is taken as it is. Nothing when it names a
+// workspace already in the list, or climbs out with "..".
+function newWorkspace(query, list, home) {
+  var text = str(query).trim()
+  if (!text) return null
+  var homePath = cleanPath(home)
+  var cwd
+  if (text === "~" || text.indexOf("~/") === 0) cwd = homePath + text.slice(1)
+  else if (text.charAt(0) === "/") cwd = text
+  else cwd = workspaceBase(list, home) + "/" + text
+  cwd = cleanPath(cwd.replace(/\/+/g, "/"))
+  var parts = cwd.split("/")
+  if (parts.indexOf("..") !== -1 || parts.indexOf(".") !== -1) return null
+  if (workspaceIndex(list, cwd) !== -1) return null
+  return { cwd: cwd, label: projectLabel(cwd, home), path: tildePath(cwd, home), tools: [], create: true }
+}
+
 // The tools a new session can start with: the installed ones, as scan.py
 // found them, else those that have sessions here.
 function newTools(apps, sessions) {
@@ -409,7 +444,8 @@ function appChoices(apps) {
 // The arguments for `scan.py open`: the app, the folder, a title for the
 // tab, the session to remember it for (or "-") and what to run.
 function openArgs(app, row, argv, remember) {
-  return ["open", app, (row && row.cwd) || "", (row && row.title) || "", remember && row && row.id ? row.id : "-"].concat(argv || [])
+  var command = row && row.create ? ["open", "--create"] : ["open"]
+  return command.concat([app, (row && row.cwd) || "", (row && row.title) || "", remember && row && row.id ? row.id : "-"]).concat(argv || [])
 }
 
 // "herdr" or "tmux" when the session runs in one of their panes, else "".

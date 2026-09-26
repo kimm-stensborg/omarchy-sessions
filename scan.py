@@ -1481,10 +1481,24 @@ def tmux_open(cwd, title, argv, run=None, window=None, spawn=None):
     return launch(cwd, ["tmux", "new-session", "-c", cwd or str(home_dir()), "-n", name, command], spawn=spawn)
 
 
-def open_session(app, cwd, title, session_id, argv, path=None, openers=None, background=None):
+def make_workspace(cwd):
+    """The folder a new session is to start in, made first when it is new.
+    Only an absolute path, and never one through `..`."""
+    folder = Path(cwd)
+    if not folder.is_absolute() or ".." in folder.parts:
+        return {"ok": False, "error": "not a folder: " + cwd}
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        return {"ok": False, "error": "could not make " + cwd + ": " + (error.strerror or str(error))}
+    return {"ok": True}
+
+
+def open_session(app, cwd, title, session_id, argv, path=None, openers=None, background=None, create=False):
     """Open a session in `app` and remember that for it. A Claude session
     running in the background is attached to rather than resumed, which
-    Claude refuses for one that is running."""
+    Claude refuses for one that is running. `create` makes the folder first,
+    for a new session in a new workspace."""
     if not argv:
         return {"ok": False, "error": "nothing to run"}
     if argv[0] == "claude" and "--resume" in argv and session_id and session_id != "-":
@@ -1503,6 +1517,10 @@ def open_session(app, cwd, title, session_id, argv, path=None, openers=None, bac
         }
     if app not in openers:
         return {"ok": False, "error": "unknown app"}
+    if create:
+        made = make_workspace(cwd)
+        if not made["ok"]:
+            return made
     result = openers[app](argv)
     if result.get("ok") and session_id and session_id != "-":
         remember_apps([session_id + "=" + app], path)
@@ -1605,16 +1623,20 @@ def codex_delete(session_id):
 def main(argv):
     command = argv[1] if len(argv) > 1 else "list"
     args = argv[2:]
+    # open --create ...  makes the folder first: a new session in a new workspace.
+    create = command == "open" and args[:1] == ["--create"]
+    if create:
+        args = args[1:]
     if command == "open" and len(args) < 5:
-        # open <app> <cwd> <title> <session-id|-> <argv...>  -- an empty cwd is "".
-        return reply({"ok": False, "error": "usage: open <app> <cwd> <title> <session-id|-> <argv...>"}, 1)
+        # open [--create] <app> <cwd> <title> <session-id|-> <argv...>  -- an empty cwd is "".
+        return reply({"ok": False, "error": "usage: open [--create] <app> <cwd> <title> <session-id|-> <argv...>"}, 1)
     commands = {
         "list": collect,
         # usage [--max-age <seconds>]
         "usage": lambda: cached_usage(float(args[1]) if args[:1] == ["--max-age"] and len(args) > 1 else None),
         "clients": window_clients,
         "apps": apps_state,
-        "open": lambda: open_session(args[0], args[1], args[2], args[3], args[4:]),
+        "open": lambda: open_session(args[0], args[1], args[2], args[3], args[4:], create=create),
         # rename <tool> <id> <title>  -- an empty title takes the name away
         "rename": lambda: rename_session(*(args[:3] + ["", "", ""])[:3]),
         "autotitle": autotitle,

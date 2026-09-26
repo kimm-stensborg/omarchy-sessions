@@ -318,6 +318,15 @@ check("rows narrowed to one folder", M.rows(spots, "", "", NOW, HOME, {}, "/home
 check("new sessions start with the installed tools", M.newTools({ tools: ["cursor", "claude"] }, spots).map(t => t.id), ["claude", "cursor"])
 check("without that, with the tools that have sessions", M.newTools({}, spots).map(t => t.id), ["claude", "grok", "codex"])
 
+check("new workspaces go where most of the others are", M.workspaceBase(places.concat([{ cwd: "/home/kimm/Projects/notes" }]), HOME), "/home/kimm/Projects")
+check("a typed name becomes a new workspace there", M.newWorkspace(" fresh ", [{ cwd: "/home/kimm/Projects/casino" }], HOME),
+  { cwd: "/home/kimm/Projects/fresh", label: "fresh", path: "~/Projects/fresh", tools: [], create: true })
+check("a typed path is taken as it is", [M.newWorkspace("~/work/x/", [], HOME).cwd, M.newWorkspace("/srv/y", [], HOME).cwd], ["/home/kimm/work/x", "/srv/y"])
+check("no new workspace for one already listed, nothing typed, or ..", [
+  M.newWorkspace("casino", [{ cwd: "/home/kimm/Projects/casino" }], HOME), M.newWorkspace(" ", [], HOME), M.newWorkspace("../etc", [], HOME)], [null, null, null])
+check("a new workspace is made before opening", M.openArgs("herdr", { cwd: "/p/x", title: "Claude", create: true }, ["claude"], false),
+  ["open", "--create", "herdr", "/p/x", "Claude", "-", "claude"])
+
 if (failures.length) {
   console.log(failures.join("\n"))
   console.log(failures.length + " failed, " + (checks - failures.length) + " ok")

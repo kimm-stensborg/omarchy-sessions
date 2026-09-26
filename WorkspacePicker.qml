@@ -10,6 +10,8 @@ import "Model.js" as Model
 //
 //   "new"     Ctrl+Enter: a tool and a workspace for a new session
 //             ← / → / Tab   tool     ↑ / ↓   workspace     Enter   start
+//             A name or path that isn't listed is offered last, as a new
+//             workspace: the folder is made when the session starts.
 //   "filter"  Ctrl+F: the one workspace the list shows, or all of them
 //             ↑ / ↓   workspace     Enter   show it
 //
@@ -36,15 +38,21 @@ Item {
 
   readonly property int visibleRows: 7
   readonly property int rowHeight: Math.max(Style.space(30), Style.font.body + Style.space(14))
-  // "All workspaces" heads the list when filtering and nothing is typed.
+  property string home: ""
+  // "All workspaces" heads the list when filtering and nothing is typed;
+  // a new workspace named by what was typed ends it when starting one.
   readonly property var shown: {
     var list = Model.filterWorkspaces(root.places, root.query)
     if (root.mode === "filter" && !root.query.trim())
       list = [{ cwd: "", label: "All workspaces", path: "", tools: [] }].concat(list)
+    if (root.mode === "new") {
+      var fresh = Model.newWorkspace(root.query, root.places, root.home)
+      if (fresh) list = list.concat([fresh])
+    }
     return list
   }
 
-  signal started(string tool, string cwd)
+  signal started(string tool, string cwd, bool create)
   signal chose(string cwd)
   signal canceled()
 
@@ -83,7 +91,7 @@ Item {
     if (root.mode === "filter") {
       root.chose(place.cwd)
     } else if (root.tools.length) {
-      root.started(root.tools[root.toolIndex].id, place.cwd)
+      root.started(root.tools[root.toolIndex].id, place.cwd, !!place.create)
     }
   }
 
@@ -220,7 +228,7 @@ Item {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
-            text: root.query || "Find a workspace…"
+            text: root.query || (root.mode === "new" ? "Find a workspace, or name a new one…" : "Find a workspace…")
             leftPadding: root.query ? 0 : caret.width + Style.space(6)
             color: root.foreground
             opacity: root.query ? 1 : 0.5
@@ -296,7 +304,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: Math.min(implicitWidth, parent.width * 0.45)
                 textFormat: Text.PlainText
-                text: place.entry ? place.entry.label : ""
+                text: place.entry ? (place.entry.create ? "+ new  " : "") + place.entry.label : ""
                 color: place.selected ? root.selectedText : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body

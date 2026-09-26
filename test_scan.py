@@ -336,6 +336,20 @@ class Opening(unittest.TestCase):
             # A default that is no longer installed falls back.
             self.assertEqual(scan.apps_state(path, which=lambda name: None)["default"], "terminal")
 
+    def test_a_new_workspace_is_made_before_opening_and_only_a_real_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "projects" / "fresh"
+            seen = []
+            opener = {"herdr": lambda command: seen.append(folder.is_dir()) or {"ok": True}}
+            result = scan.open_session("herdr", str(folder), "Claude", "-", ["python3"], Path(tmp) / "apps.json",
+                                       openers=opener, create=True)
+            self.assertEqual([result["ok"], seen], [True, [True]])
+            for bad in ("relative/dir", tmp + "/../escape"):
+                result = scan.open_session("herdr", bad, "Claude", "-", ["python3"], Path(tmp) / "apps.json",
+                                           openers=opener, create=True)
+                self.assertFalse(result["ok"])
+            self.assertEqual(seen, [True])
+
     def herdr(self, workspaces):
         calls = []
 
