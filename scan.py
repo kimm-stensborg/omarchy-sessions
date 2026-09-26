@@ -988,7 +988,29 @@ def process_cmdline(pid):
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
         return ""
-    return raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+    argv = raw.decode("utf-8", "replace").split("\x00")
+    return " ".join(without_fork_source(argv)).strip()
+
+
+def without_fork_source(argv):
+    """A forked Claude session (`--fork-session --resume <old>`) runs a new
+    session and only started from the old one; the old one's id is left out
+    so it doesn't count as running along with it."""
+    if "--fork-session" not in argv:
+        return argv
+    out = []
+    skip = False
+    for arg in argv:
+        if skip:
+            skip = False
+            continue
+        if arg in ("--resume", "-r"):
+            skip = True
+            continue
+        if arg.startswith("--resume="):
+            continue
+        out.append(arg)
+    return out
 
 
 def process_parents():

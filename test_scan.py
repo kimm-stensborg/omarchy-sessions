@@ -318,6 +318,14 @@ class Delete(unittest.TestCase):
         self.assertTrue(scan.session_running(mine[0], Path.home()))
 
 
+class Forks(unittest.TestCase):
+    def test_a_fork_does_not_keep_the_session_it_started_from_running(self):
+        old = "/home/u/.claude/projects/p/f94a28db-a70f-4eb4-aa34-a39cc40c4399.jsonl"
+        argv = ["claude", "--session-id", "e1f5", "--fork-session", "--resume", old, "--reply-on-resume"]
+        self.assertEqual(scan.without_fork_source(argv), ["claude", "--session-id", "e1f5", "--fork-session", "--reply-on-resume"])
+        self.assertEqual(scan.without_fork_source(["claude", "--resume", old]), ["claude", "--resume", old])
+
+
 class Opening(unittest.TestCase):
     ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 

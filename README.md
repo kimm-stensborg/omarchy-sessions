@@ -52,7 +52,7 @@ A Claude session running in the background (one Claude parked as a background jo
 
 ## Deleting a session
 
-Del on a session asks first, naming it; Del or Enter deletes, Esc keeps it. A session that is still running cannot be deleted: the panel will not offer it, and before deleting `scan.py` looks again across every process on the machine, not only the ones in a window, so a session in a background pane or job is safe too.
+Del on a session asks first, naming it; Del or Enter deletes, Esc keeps it. A session that is still running cannot be deleted: the panel will not offer it, and before deleting `scan.py` looks again across every process on the machine, not only the ones in a window, so a session in a background pane or job is safe too. A session another one was forked from (Claude's `--fork-session`, as a background session does) is not counted as running just because the fork started from it.
 
 A deleted session folds out of the list and the one above it is selected. The list stays scrolled where it was, so the selection keeps its place on screen and nothing slides under it before the next Del.
 
