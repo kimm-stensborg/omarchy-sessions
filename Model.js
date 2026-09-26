@@ -351,26 +351,39 @@ function paneKindOf(session, clients) {
 
 // `id=app` for each session found running in a herdr or tmux pane that is
 // not yet remembered that way, so sessions started by hand are remembered.
-function panesToRemember(sessions, clients, apps) {
+function panesToRemember(sessions, clients, apps, background) {
   var out = []
   var list = sessions || []
   var known = (apps && apps.sessions) || {}
+  var behind = background || []
   for (var i = 0; i < list.length; i++) {
+    if (behind.indexOf(list[i].id) !== -1) continue
     var kind = paneKindOf(list[i], clients)
     if (kind && known[list[i].id] !== kind) out.push(list[i].id + "=" + kind)
   }
   return out
 }
 
-// The sessions some window is already running, as { id: true }.
-function runningIds(sessions, clients) {
+// The sessions some window is already running, and Claude's background
+// sessions, which run with no window of their own, as { id: true }.
+function runningIds(sessions, clients, background) {
   var running = {}
   var list = sessions || []
-  if (!clients || !clients.length) return running
+  var behind = background || []
   for (var i = 0; i < list.length; i++) {
-    if (matchClient(list[i], clients)) running[list[i].id] = true
+    if (behind.indexOf(list[i].id) !== -1 || (clients && clients.length && matchClient(list[i], clients)))
+      running[list[i].id] = true
   }
   return running
+}
+
+// The window to bring forward for a session, or null when it has to be
+// opened. A background session shows up inside the terminal of the session
+// that parked it, but that terminal is showing something else: it is opened
+// with `claude attach` instead.
+function windowFor(session, clients, background) {
+  if (session && (background || []).indexOf(session.id) !== -1) return null
+  return matchClient(session, clients)
 }
 
 // ---------------------------------------------------------------- usage

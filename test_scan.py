@@ -392,14 +392,25 @@ class Opening(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(spawned[0][-7:], ["tmux", "new-session", "-c", "/tmp", "-n", "Fix it", "codex resume x1"])
 
+    def test_a_background_claude_session_is_attached_to_not_resumed(self):
+        ran = []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "apps.json"
+            openers = {"herdr": lambda command: ran.append(command) or {"ok": True}}
+            scan.open_session("herdr", "/tmp", "t", self.ID, ["claude", "--resume", self.ID], path,
+                              openers=openers, background={self.ID: 42})
+            scan.open_session("herdr", "/tmp", "t", self.ID, ["claude", "--resume", self.ID], path,
+                              openers=openers, background={})
+        self.assertEqual(ran, [["claude", "attach", "aaaaaaaa"], ["claude", "--resume", self.ID]])
+
     def test_opening_remembers_the_app_for_the_session(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "apps.json"
             result = scan.open_session("herdr", "/tmp", "t", self.ID, ["python3", "-c", "0"], path,
-                                       openers={"herdr": lambda: {"ok": True}})
+                                       openers={"herdr": lambda command: {"ok": True}})
             self.assertTrue(result["ok"])
             self.assertEqual(scan.read_apps(path)["sessions"], {self.ID: "herdr"})
-            scan.open_session("herdr", "/tmp", "t", "-", ["python3"], path, openers={"herdr": lambda: {"ok": True}})
+            scan.open_session("herdr", "/tmp", "t", "-", ["python3"], path, openers={"herdr": lambda command: {"ok": True}})
             self.assertEqual(len(scan.read_apps(path)["sessions"]), 1)
 
     def test_a_tmux_pane_belongs_to_the_window_its_client_runs_in(self):

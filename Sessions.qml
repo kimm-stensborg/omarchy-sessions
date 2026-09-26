@@ -34,6 +34,8 @@ Item {
   property var usage: []
   // Open windows, as scan.py describes them, for marking what already runs.
   property var clients: []
+  // Claude sessions running in the background, from scan.py `list`.
+  property var backgroundSessions: []
   // Where sessions open: the installed apps, the default and each session's
   // own, from scan.py `apps`.
   property var apps: ({ available: ["terminal"], default: "terminal", sessions: {} })
@@ -139,7 +141,7 @@ Item {
     if (!stillThere && root.sessions.length > 0) root.tool = ""
     root.chips = chips
     var built = Model.rows(root.sessions, root.queryText, root.tool, Date.now(), root.home,
-      Model.runningIds(root.sessions, root.clients))
+      Model.runningIds(root.sessions, root.clients, root.backgroundSessions))
     root.viewRows = built.rows
     root.count = built.count
     if (root.selected >= root.count) root.selected = Math.max(0, root.count - 1)
@@ -184,6 +186,7 @@ Item {
       root.statusMessage = "Could not read sessions"
       return
     }
+    root.backgroundSessions = payload.background || []
     root.sessions = Model.normalize(payload.sessions, root.home)
     root.refresh()
     root.rememberPanes()
@@ -344,7 +347,7 @@ Item {
   // Sessions found running in a herdr or tmux pane are remembered there, so
   // one started by hand opens there again too.
   function rememberPanes() {
-    var pairs = Model.panesToRemember(root.sessions, root.clients, root.apps)
+    var pairs = Model.panesToRemember(root.sessions, root.clients, root.apps, root.backgroundSessions)
     if (!pairs.length) return
     var sessions = Object.assign({}, root.apps.sessions)
     for (var i = 0; i < pairs.length; i++) {
@@ -359,7 +362,7 @@ Item {
   function resumeWithClients(clients) {
     var row = clientProc.pending
     if (!row) return
-    var hit = Model.matchClient(row, clients)
+    var hit = Model.windowFor(row, clients, root.backgroundSessions)
     if (hit) {
       // Closed first: while the overlay holds the keyboard, Hyprland hands
       // focus back to the previous window as it goes, undoing the focus.

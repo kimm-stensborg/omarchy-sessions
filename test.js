@@ -130,6 +130,12 @@ check("the pane a session runs in says which app it is in", [M.paneKindOf(sessio
   ["herdr", "tmux", ""])
 check("sessions found in panes are remembered when that is news", M.panesToRemember(sessions, inPanes, { sessions: { g1: "herdr" } }), ["c1=tmux"])
 
+const parked = [{ address: "0xa", text: "herdr\nc1\nx1", panes: [{ kind: "herdr", pane: "w9:p1", text: "claude\nc1\nx1" }] }]
+check("a background session counts as running even with no window", M.runningIds(sessions, [], ["u1"]), { u1: true })
+check("a background session is opened, not focused in the terminal that parked it",
+  [M.windowFor(sessions[1], parked, ["c1"]), M.windowFor(sessions[2], parked, ["c1"]).address], [null, "0xa"])
+check("a background session is not remembered as living in that pane", M.panesToRemember(sessions, parked, {}, ["c1"]), ["x1=herdr"])
+
 check("a new conversation starts the tool bare", ["claude", "grok", "codex", "cursor", "other"].map(M.newArgv),
   [["claude"], ["grok"], ["codex"], ["agent"], null])
 

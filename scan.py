@@ -844,7 +844,8 @@ def collect(home=None):
         if raw["id"] in titles["auto"]:
             raw["autoTitle"] = titles["auto"][raw["id"]]
     return {"sessions": sessions, "warnings": warnings,
-            "untitled": len(untitled(sessions))}
+            "untitled": len(untitled(sessions)),
+            "background": sorted(claude_background(home))}
 
 
 # ---------------------------------------------------------------- titles
@@ -1054,6 +1055,21 @@ def claude_running(home):
     return running
 
 
+def claude_background(home):
+    """Claude sessions running as background jobs, {session id: pid}. They
+    live under Claude's daemon rather than in a terminal, and are opened
+    again with `claude attach`, not `--resume`."""
+    found = {}
+    for path in Path(home, ".claude", "sessions").glob("*.json"):
+        record = read_json(path)
+        if not isinstance(record, dict) or record.get("kind") != "bg" or not record.get("sessionId"):
+            continue
+        pid = record.get("pid")
+        if isinstance(pid, int) and Path(f"/proc/{pid}").exists():
+            found[str(record["sessionId"])] = pid
+    return found
+
+
 def grok_running(home):
     """{pid: session id} from Grok's list of open sessions."""
     running = {}
@@ -1102,11 +1118,17 @@ def run_json(command, timeout=3):
         return None
 
 
-def herdr_panes():
+def herdr_panes(parents=None):
     """Every herdr pane with the pid of the shell it runs, from herdr's own
-    socket API. Empty when herdr is not installed or not running."""
+    socket API. Empty when herdr is not installed or not running.
+
+    herdr's server outlives the terminal that started it and is then no
+    longer inside any window, so a pane is found in a window through the
+    herdr clients (`herdr` in a terminal) showing the server, as tmux's are."""
     if shutil.which("herdr") is None:
         return []
+    parents = parents if parents is not None else process_parents()
+    clients = [pid for pid in parents if is_herdr_client(pid)]
     listing = run_json(["herdr", "pane", "list"])
     result = listing.get("result") if isinstance(listing, dict) else None
     panes = []
@@ -1123,7 +1145,7 @@ def herdr_panes():
                 "tab": str(pane.get("tab_id") or ""),
                 "workspace": str(pane.get("workspace_id") or ""),
                 "shell": shell,
-                "clients": [],
+                "clients": clients,
             })
     return panes
 
@@ -1225,8 +1247,9 @@ def window_clients(home=None):
     if not isinstance(clients, list):
         return []
     running = {**claude_running(home), **grok_running(home)}
-    return describe_windows(clients, process_parents(), lambda pid: process_marks(pid, running),
-                            herdr_panes() + tmux_panes())
+    parents = process_parents()
+    return describe_windows(clients, parents, lambda pid: process_marks(pid, running),
+                            herdr_panes(parents) + tmux_panes())
 
 
 def launch(cwd, argv, spawn=None):
@@ -1388,6 +1411,11 @@ def is_herdr_client(pid):
     return bool(argv) and os.path.basename(argv[0]) == "herdr" and "server" not in argv[1:2]
 
 
+def attach_argv(session_id):
+    """`claude attach` takes the short id Claude shows for a background session."""
+    return ["claude", "attach", session_id[:8]]
+
+
 def herdr_open(cwd, title, argv, run=None, window=None, spawn=None, wait=5.0, succeeds=None):
     """Open a session in herdr: a new tab in the workspace named after its
     folder (herdr names workspaces after folders), or a new workspace when
@@ -1447,23 +1475,29 @@ def tmux_open(cwd, title, argv, run=None, window=None, spawn=None):
     return launch(cwd, ["tmux", "new-session", "-c", cwd or str(home_dir()), "-n", name, command], spawn=spawn)
 
 
-def open_session(app, cwd, title, session_id, argv, path=None, openers=None):
-    """Open a session in `app` and remember that for it."""
+def open_session(app, cwd, title, session_id, argv, path=None, openers=None, background=None):
+    """Open a session in `app` and remember that for it. A Claude session
+    running in the background is attached to rather than resumed, which
+    Claude refuses for one that is running."""
     if not argv:
         return {"ok": False, "error": "nothing to run"}
+    if argv[0] == "claude" and "--resume" in argv and session_id and session_id != "-":
+        running_in_background = background if background is not None else claude_background(home_dir())
+        if session_id in running_in_background:
+            argv = attach_argv(session_id)
     if shutil.which(argv[0]) is None and not Path(argv[0]).is_file():
         return {"ok": False, "error": argv[0] + " is not installed"}
     if openers is None:
         if app not in available_apps():
             return {"ok": False, "error": app + " is not installed"}
         openers = {
-            "terminal": lambda: launch(cwd, argv),
-            "herdr": lambda: herdr_open(cwd, title, argv),
-            "tmux": lambda: tmux_open(cwd, title, argv),
+            "terminal": lambda command: launch(cwd, command),
+            "herdr": lambda command: herdr_open(cwd, title, command),
+            "tmux": lambda command: tmux_open(cwd, title, command),
         }
     if app not in openers:
         return {"ok": False, "error": "unknown app"}
-    result = openers[app]()
+    result = openers[app](argv)
     if result.get("ok") and session_id and session_id != "-":
         remember_apps([session_id + "=" + app], path)
     return result

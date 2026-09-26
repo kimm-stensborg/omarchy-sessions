@@ -42,7 +42,7 @@ A session that is not running opens in **herdr**, **tmux** or a plain **Terminal
 - **tmux**: a new window in the tmux session a terminal is attached to, which then comes forward; with no tmux client attached, a new terminal with a new tmux session.
 - **Terminal**: a new window of your default terminal, as `xdg-terminal-exec` picks it.
 
-A session found running in a herdr or tmux pane is remembered there as well, so one started by hand opens there again next time. Sessions in tmux are brought forward in their pane, as herdr's are. What is remembered lives in `~/.local/state/omarchy/sessions/apps.json`.
+A Claude session running in the background (one Claude parked as a background job) counts as running but has no window of its own: Enter opens it with `claude attach` in its app, as Claude requires, rather than `--resume`, which Claude refuses for a running session. A session found running in a herdr or tmux pane is remembered there as well, so one started by hand opens there again next time. Sessions in tmux are brought forward in their pane, as herdr's are. Both are found through the terminal showing them, so a herdr server that has outlived the terminal that started it still counts. What is remembered lives in `~/.local/state/omarchy/sessions/apps.json`.
 
 ## Deleting a session
 
