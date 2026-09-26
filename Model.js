@@ -274,6 +274,30 @@ function afterRemoval(viewRows, id) {
   return { folding: [], selected: 0 }
 }
 
+// The filters kept between launches, from filters.json: a tool, a folder
+// and whether only running sessions show. Anything else is left out.
+function savedFilters(text) {
+  var data = null
+  try { data = JSON.parse(str(text) || "{}") } catch (error) { data = null }
+  if (!data || typeof data !== "object") data = {}
+  return {
+    tool: TOOLS.indexOf(data.tool) !== -1 ? data.tool : "",
+    folder: typeof data.folder === "string" && data.folder.charAt(0) === "/" ? cleanPath(data.folder) : "",
+    running: data.running === true
+  }
+}
+
+// What the panel opens with: what it was asked for, else what was kept.
+function openingFilters(payload, saved) {
+  var asked = payload || {}
+  var kept = saved || savedFilters("")
+  return {
+    tool: asked.tool !== undefined ? str(asked.tool) : kept.tool,
+    folder: asked.folder !== undefined ? str(asked.folder) : kept.folder,
+    running: asked.running !== undefined ? asked.running === true : kept.running
+  }
+}
+
 // Every folder a session was held in, newest first, once each: the
 // workspaces a new session can start in and the list can be narrowed to.
 // Named as the headers name them; `path` is the folder with ~ for home.

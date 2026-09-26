@@ -88,9 +88,11 @@ Item {
     var payload = root.parseJson(payloadJson || "{}") || ({})
     root.opened = true
     root.queryText = payload.query ? String(payload.query) : ""
-    root.tool = payload.tool ? String(payload.tool) : ""
-    root.folder = payload.folder ? String(payload.folder) : ""
-    root.runningOnly = payload.running === true
+    // The filters left on last time come back, unless the call asks otherwise.
+    var filters = Model.openingFilters(payload, Model.savedFilters(filtersFile.text()))
+    root.tool = filters.tool
+    root.folder = filters.folder
+    root.runningOnly = filters.running
     root.selected = 0
     root.statusMessage = ""
     root.sessions = []
@@ -238,6 +240,7 @@ Item {
     root.selected = 0
     pointerGate.reset()
     root.refresh()
+    root.saveFilters()
   }
 
   // A terminal whose command line already carries this session comes
@@ -363,6 +366,11 @@ Item {
     root.selected = 0
     pointerGate.reset()
     root.refresh()
+    root.saveFilters()
+  }
+
+  function saveFilters() {
+    filtersFile.setText(JSON.stringify({ tool: root.tool, folder: root.folder, running: root.runningOnly }) + "\n")
   }
 
   function showFolder(cwd) {
@@ -370,6 +378,7 @@ Item {
     root.selected = 0
     pointerGate.reset()
     root.refresh()
+    root.saveFilters()
   }
 
   // Closed first, as for focusing: herdr and tmux bring their window
@@ -604,6 +613,15 @@ Item {
     onLoaded: root.themeColors = Model.themeColors(text())
   }
 
+  // The tool, folder and running filters, kept for the next launch.
+  FileView {
+    id: filtersFile
+    path: root.home + "/.local/state/omarchy/sessions/filters.json"
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+  }
+
   PointerMoveGate {
     id: pointerGate
     referenceItem: card
@@ -684,9 +702,8 @@ Item {
             root.chooseFolder()
             event.accepted = true
           } else if (event.key === Qt.Key_Escape) {
+            // The filters stay: they are kept for next time.
             if (root.queryText) root.setQuery("")
-            else if (root.folder) root.showFolder("")
-            else if (root.runningOnly) root.showRunning(false)
             else root.close()
             event.accepted = true
           } else if (event.key === Qt.Key_Up) {

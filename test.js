@@ -336,6 +336,12 @@ check("a session no longer listed folds nothing", M.afterRemoval(shownRows, "zz"
 check("only the running ones", M.rows(spots, "", "", NOW, HOME, { c: true, d: true }, "", true).rows.map(r => r.kind === "header" ? r.project : r.id),
   ["casino", "c", "Home", "d"])
 
+check("kept filters are read back", M.savedFilters('{"tool":"grok","folder":"/p/x/","running":true}'), { tool: "grok", folder: "/p/x", running: true })
+check("kept filters that make no sense are dropped", M.savedFilters('{"tool":"vim","folder":"rel","running":"yes"}'), { tool: "", folder: "", running: false })
+check("a broken file keeps nothing", M.savedFilters("{nope"), { tool: "", folder: "", running: false })
+check("what the panel is opened with wins over what was kept",
+  M.openingFilters({ tool: "" }, { tool: "grok", folder: "/p/x", running: true }), { tool: "", folder: "/p/x", running: true })
+
 if (failures.length) {
   console.log(failures.join("\n"))
   console.log(failures.length + " failed, " + (checks - failures.length) + " ok")
