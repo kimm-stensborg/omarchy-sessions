@@ -127,6 +127,10 @@ function sessionFromRaw(raw, home) {
     cwd: cwd,
     key: key,
     title: title,
+    // Neither you nor its tool named it (a Haiku title stands in): mostly
+    // sessions that never got past a prompt or two.
+    untitled: !(oneLine(raw.customTitle) || oneLine(raw.aiTitle) || oneLine(raw.summary)
+      || oneLine(raw.generatedTitle) || oneLine(raw.title)),
     updated: toMs(raw.updated),
     project: projectLabel(cwd || str(raw.fallback), home)
   }
@@ -245,6 +249,8 @@ function rows(sessions, query, tool, now, home, running, folder, onlyRunning, st
         title: session.title,
         project: pinned ? labels[session.key] || session.project : label,
         pinned: pinned,
+        updated: session.updated,
+        untitled: !!session.untitled,
         when: relativeTime(session.updated, now),
         running: !!(running && running[session.id]),
         background: !!(running && running[session.id] === "background"),
@@ -272,18 +278,37 @@ function toolsPresent(sessions) {
 // the session to select after, the one above it, else the new first. The
 // cursors below it close up by one, so the one above keeps its number.
 function afterRemoval(viewRows, id) {
-  var list = viewRows || []
-  for (var i = 0; i < list.length; i++) {
-    var row = list[i]
-    if (row.kind !== "session" || row.id !== id) continue
-    var folding = [i]
-    var header = i > 0 ? list[i - 1] : null
-    if (header && header.kind === "header" && header.count === 1) folding.unshift(i - 1)
-    return { folding: folding, selected: Math.max(0, row.cursor - 1) }
-  }
-  return { folding: [], selected: 0 }
+  return afterRemovals(viewRows, [id])
 }
 
+// The same for several at once: a header folds away with the last of its
+// sessions, and the session above the first one removed is selected.
+function afterRemovals(viewRows, ids) {
+  var list = viewRows || []
+  var gone = {}
+  for (var k = 0; k < (ids || []).length; k++) gone[ids[k]] = true
+  var folding = []
+  var firstGone = -1
+  var above = 0
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i]
+    if (row.kind === "header") {
+      var end = i + 1
+      while (end < list.length && list[end].kind !== "header") end += 1
+      var all = end > i + 1
+      for (var m = i + 1; m < end; m++) if (!gone[list[m].id]) all = false
+      if (all) folding.push(i)
+      continue
+    }
+    if (gone[row.id]) {
+      folding.push(i)
+      if (firstGone < 0) firstGone = row.cursor
+    } else if (firstGone < 0) {
+      above += 1
+    }
+  }
+  return { folding: folding, selected: firstGone < 0 ? 0 : Math.max(0, above - 1) }
+}
 // The filters kept between launches, from filters.json: a tool, a folder
 // and whether only running sessions show. Anything else is left out.
 function savedFilters(text) {
@@ -317,7 +342,10 @@ var SHORTCUTS = [
     ["→ ←", "Peek at the last messages, hide"],
     ["Ctrl+P", "Pin to the top, unpin"],
     ["F2", "Name the session"],
-    ["Del", "Delete the session"]
+    ["Del", "Delete the session, or all marked"],
+    ["Ctrl+Space", "Mark for deleting together"],
+    ["Ctrl+A", "Mark all shown"],
+    ["Ctrl+D", "Clean up: mark by a rule"]
   ] },
   { group: "Find", keys: [
     ["Type", "Narrow the list"],
@@ -342,7 +370,8 @@ var SHORTCUTS = [
 // The few keys worth showing at the foot for what is in hand; the rest are
 // on the Ctrl+? sheet.
 // `pill` is the header pill in hand (0 tool, 1 running, 2 workspace), or -1.
-function footerHints(row, query, pill, peeking) {
+function footerHints(row, query, pill, peeking, marks) {
+  if (marks) return [["del", "deletes " + marks + " marked"], ["ctrl+space", "marks"], ["esc", "unmarks all"]]
   if (pill === 0 || pill === 2) return [["enter", "opens"], ["tab", "next"], ["esc", "back to the list"]]
   if (pill === 1) return [["enter", "switches"], ["tab", "next"], ["esc", "back to the list"]]
   var hints = []
@@ -463,6 +492,49 @@ function newTools(apps, sessions) {
 function nextPill(current, delta) {
   var at = typeof current === "number" && current >= -1 && current <= 2 ? current + 1 : 0
   return ((at + delta) % 4 + 4) % 4 - 1
+}
+
+// ---------------------------------------------------------------- marking
+// Sessions marked for deleting together: {id: true}. A running session
+// can't be deleted, so it can't be marked either.
+function toggleMark(marked, row) {
+  var next = Object.assign({}, marked || {})
+  if (!row || row.kind !== "session") return next
+  if (next[row.id]) delete next[row.id]
+  else if (!row.running) next[row.id] = true
+  return next
+}
+
+function markedRows(viewRows, marked) {
+  return (viewRows || []).filter(function(row) { return row.kind === "session" && marked && marked[row.id] })
+}
+
+// Ctrl+D's rules, each with the sessions the list shows that it would mark.
+// Running and pinned sessions are left alone.
+var DAY = 86400000
+var CLEANUP_RULES = [
+  { id: "7d", label: "Older than a week", test: function(row, now) { return now - row.updated > 7 * DAY } },
+  { id: "30d", label: "Older than 30 days", test: function(row, now) { return now - row.updated > 30 * DAY } },
+  { id: "90d", label: "Older than 90 days", test: function(row, now) { return now - row.updated > 90 * DAY } },
+  { id: "untitled", label: "Never named by you or its tool", test: function(row) { return row.untitled } }
+]
+
+function cleanupRules(viewRows, now) {
+  var sessions = (viewRows || []).filter(function(row) { return row.kind === "session" && !row.running && !row.pinned })
+  return CLEANUP_RULES.map(function(rule) {
+    var ids = sessions.filter(function(row) { return rule.test(row, now) }).map(function(row) { return row.id })
+    return { id: rule.id, label: rule.label, ids: ids }
+  })
+}
+
+// What Del says about the marked sessions.
+function deleteManyText(rows) {
+  var count = (rows || []).length
+  var codex = (rows || []).filter(function(row) { return row.tool === "codex" }).length
+  var what = count === 1 ? "1 session" : count + " sessions"
+  var where = count === 1 ? (codex ? "Codex deletes it for good." : "It goes to the trash.")
+    : codex === count ? "Codex deletes them for good." : codex ? "They go to the trash; Codex's are deleted for good." : "They go to the trash."
+  return "Delete " + what + "?\n" + where
 }
 
 // Pins after pinning or unpinning `id`: a pinned one comes first.

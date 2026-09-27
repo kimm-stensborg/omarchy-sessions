@@ -365,6 +365,20 @@ class Peeking(unittest.TestCase):
             self.assertFalse(scan.peek("claude", self.ID, home)["ok"])
 
 
+class DeletingMany(unittest.TestCase):
+    def test_each_is_deleted_on_its_own_and_a_refusal_skips_only_that_one(self):
+        seen = []
+
+        def delete(tool, session_id):
+            seen.append((tool, session_id))
+            return {"ok": session_id != "busy-session"} if session_id != "busy-session" else {"ok": False, "error": "still running"}
+
+        result = scan.delete_sessions(["claude:aaaaaaaa-1", "grok:busy-session", "codex:cccccccc-3"], delete=delete)
+        self.assertEqual(seen, [("claude", "aaaaaaaa-1"), ("grok", "busy-session"), ("codex", "cccccccc-3")])
+        self.assertEqual([result["ok"], result["deleted"], result["failed"]],
+                         [False, ["aaaaaaaa-1", "cccccccc-3"], [{"id": "busy-session", "error": "still running"}]])
+
+
 class Stopping(unittest.TestCase):
     ID = "e1f5072c-e17c-4a1e-a411-0fb725ff1110"
 

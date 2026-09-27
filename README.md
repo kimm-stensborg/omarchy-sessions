@@ -70,6 +70,8 @@ Del on a session asks first, naming it; Del or Enter deletes, Esc keeps it. A se
 
 A Claude session running in the background has no window to close it in, and its row says **background**. Del on it offers to stop it instead (`claude stop`), which keeps the conversation; once it has stopped, Del deletes it as any other.
 
+**Several at once.** Ctrl+Space marks the session in hand (a ✓ in front of it) and steps to the next; Ctrl+click marks one with the mouse, and Ctrl+A marks every session the list shows. With sessions marked, Del deletes them all after one confirm that counts them, and Esc unmarks them. Ctrl+D does the marking by a rule: older than a week, 30 days or 90 days, or never named by you or its tool (a Haiku title stands in for one, so this finds the sessions that never got going). Each rule says how many of the sessions the list shows it matches, and picking one marks them, so you can look them over, and unmark some with Ctrl+Space, before Del. Rules only ever look at what the list shows, so the pills narrow them too, and they leave running and pinned sessions alone. A session that turns out to be running when it is deleted is skipped, not the rest.
+
 A deleted session folds out of the list and the one above it is selected. The list stays scrolled where it was, so the selection keeps its place on screen and nothing slides under it before the next Del.
 
 | Tool | What goes |
@@ -139,7 +141,10 @@ omarchy-shell shell summon io.github.kimm-stensborg.sessions '{"query":"notes","
 | → / ← | Show the last messages of that session beside the list, or hide them. |
 | Ctrl+P | Pin that session to the top of the list, or unpin it. |
 | F2 | Name that session. Enter saves, Esc cancels; an empty name gives it back its own title. |
-| Del | Delete that session, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted; one running in the background is offered a stop instead. |
+| Ctrl+Space / Ctrl+click | Mark that session for deleting together, or unmark it. |
+| Ctrl+A | Mark every session the list shows. |
+| Ctrl+D | Clean up: mark the sessions a rule matches (by age, or never named). |
+| Del | Delete that session, or every marked one, after asking. Del or Enter deletes, Esc cancels. A session still running anywhere can't be deleted; one running in the background is offered a stop instead. |
 | Tab / Shift+Tab | Move along the pills (tools, running, workspace) and back to the list. Enter opens or switches the one in hand, Esc goes back to the list. |
 | Click a subscription at the foot | Show only that tool's sessions. |
 | Click a folder header | Show only that folder's sessions. Click it again for all of them. |
@@ -174,6 +179,7 @@ Then delete the `-- Sessions overlay` block from `~/.config/hypr/bindings.lua`.
 |------|------|
 | `Sessions.qml` | The panel: search line, pills and the session list. |
 | `ToolMenu.qml` | The tool pill's list of tools. |
+| `CleanupDialog.qml` | The Ctrl+D rules for marking sessions to delete. |
 | `PeekPane.qml` | The → pane: the last messages of the session in hand. |
 | `BarWidget.qml` | The bar button, its setting, the five-minute refresh, and the popup's key. |
 | `UsagePanel.qml` | The popup under the bar button. |

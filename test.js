@@ -373,6 +373,23 @@ check("a background session is running with no window", M.rows(spots, "", "", NO
 
 check("a background session attaches and stops", M.footerHints({ running: true, background: true }, "").map(h => h.join(" ")).slice(0, 2), ["enter attaches", "del stops"])
 
+const many = M.afterRemovals(shownRows, ["c", "b"])
+check("several fold away at once, headers with them", many, { folding: [2, 3, 4], selected: 0 })
+check("the one above the first removed is selected", M.afterRemovals(shownRows, ["b", "d"]).selected, 1)
+const marks = M.toggleMark({}, { kind: "session", id: "a", running: false })
+check("marking and unmarking, never a running one", [marks, M.toggleMark(marks, { kind: "session", id: "a" }), M.toggleMark({}, { kind: "session", id: "r", running: true })], [{ a: true }, {}, {}])
+check("marked rows in list order", M.markedRows(shownRows, { d: true, a: true }).map(r => r.id), ["a", "d"])
+const old = [{ kind: "session", id: "o", updated: NOW - 40 * 86400000 }, { kind: "session", id: "n", updated: NOW, untitled: true },
+  { kind: "session", id: "p", updated: NOW - 400 * 86400000, pinned: true }, { kind: "session", id: "r", updated: 0, running: true }]
+check("rules mark what they match, never pinned or running", M.cleanupRules(old, NOW).map(r => [r.id, r.ids]),
+  [["7d", ["o"]], ["30d", ["o"]], ["90d", []], ["untitled", ["n"]]])
+check("a session its tool never named is untitled, a Haiku title or not", [M.sessionFromRaw({ tool: "claude", id: "x", firstUser: "pull" }, HOME).untitled,
+  M.sessionFromRaw({ tool: "claude", id: "y", firstUser: "pull", autoTitle: "Pull main" }, HOME).untitled,
+  M.sessionFromRaw({ tool: "claude", id: "z", firstUser: "pull", aiTitle: "Pull" }, HOME).untitled], [true, true, false])
+check("the confirm counts and says where they go", [M.deleteManyText([{ tool: "claude" }, { tool: "codex" }]), M.deleteManyText([{ tool: "grok" }])],
+  ["Delete 2 sessions?\nThey go to the trash; Codex's are deleted for good.", "Delete 1 session?\nIt goes to the trash."])
+check("with marks the foot is about them", M.footerHints({ running: false }, "", -1, false, 3)[0], ["del", "deletes 3 marked"])
+
 if (failures.length) {
   console.log(failures.join("\n"))
   console.log(failures.length + " failed, " + (checks - failures.length) + " ok")

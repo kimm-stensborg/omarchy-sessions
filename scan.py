@@ -1768,6 +1768,22 @@ def delete_session(tool, session_id, home=None, running=session_running, discard
     return {"ok": True, "removed": len(paths)}
 
 
+def delete_sessions(pairs, home=None, delete=None):
+    """Delete several sessions, given as `tool:id`. Each is checked on its
+    own, as for one: a running session is skipped, not the whole lot."""
+    delete = delete or (lambda tool, session_id: delete_session(tool, session_id, home))
+    deleted = []
+    failed = []
+    for pair in pairs:
+        tool, _, session_id = str(pair).partition(":")
+        result = delete(tool, session_id)
+        if result.get("ok"):
+            deleted.append(session_id)
+        else:
+            failed.append({"id": session_id, "error": result.get("error", "")})
+    return {"ok": not failed, "deleted": deleted, "failed": failed}
+
+
 def stop_session(session_id, home=None, background=None, run=None):
     """Stop a Claude session running in the background, which has no window
     to close it in. Its conversation is kept, so it can be deleted after."""
@@ -1835,6 +1851,8 @@ def main(argv):
         "focus": lambda: focus(*(args[:5] or [""])),
         # delete <tool> <id>
         "delete": lambda: delete_session(*(args[:2] + ["", ""])[:2]),
+        # delete-many <tool>:<id> ...
+        "delete-many": lambda: delete_sessions(args),
         # stop <id>  -- a Claude session running in the background
         "stop": lambda: stop_session(args[0] if args else ""),
     }

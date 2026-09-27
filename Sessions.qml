@@ -61,6 +61,7 @@ Item {
   readonly property color matchColor: root.themeColors.yellow || root.accent
   readonly property color runningColor: root.themeColors.green || root.accent
   readonly property color warningColor: root.themeColors.yellow || root.accent
+  readonly property color urgentColor: root.themeColors.red || Color.urgent
   property bool scanning: false
   property string statusMessage: ""
   property int serial: 0
@@ -108,6 +109,7 @@ Item {
     root.folder = filters.folder
     root.runningOnly = filters.running
     root.pill = -1
+    root.marked = ({})
     root.pins = Model.savedPins(pinsFile.text())
     root.selected = 0
     root.statusMessage = ""
@@ -130,6 +132,7 @@ Item {
 
   function close() {
     root.opened = false
+    cleanup.opened = false
     toolMenu.opened = false
     picker.opened = false
     sheet.opened = false
@@ -293,12 +296,58 @@ Item {
   property var pendingDelete: null
   // The pending delete is a background session, to be stopped first.
   property bool pendingStop: false
+  // Sessions marked for deleting together, {id: true}; Ctrl+Space, Ctrl+A
+  // and Ctrl+D mark them. Only those the list shows count.
+  property var marked: ({})
+  readonly property var markedShown: Model.markedRows(root.viewRows, root.marked)
+  // The marked sessions a pending Del is about.
+  property var pendingMany: []
   // The visual rows of a deleted session folding away, and its id.
   property var folding: []
-  property string foldingId: ""
+  property var foldingIds: []
   property bool autotitleTried: false
 
+  // Ctrl+Space: mark the session in hand, or unmark it, and step down.
+  function markCurrent() {
+    var row = root.current
+    if (!row) return
+    if (row.running && !root.marked[row.id]) {
+      root.flash("Running; it can't be deleted")
+      return
+    }
+    root.marked = Model.toggleMark(root.marked, row)
+    root.move(1)
+  }
+
+  // Ctrl+A: mark every session the list shows that could be deleted.
+  function markAll() {
+    var next = Object.assign({}, root.marked)
+    for (var i = 0; i < root.viewRows.length; i++) {
+      var row = root.viewRows[i]
+      if (row.kind === "session" && !row.running) next[row.id] = true
+    }
+    root.marked = next
+  }
+
+  // Ctrl+D picked a rule: its sessions join the marked.
+  function markIds(ids) {
+    var next = Object.assign({}, root.marked)
+    for (var i = 0; i < ids.length; i++) next[ids[i]] = true
+    root.marked = next
+    root.flash(ids.length === 1 ? "1 marked" : ids.length + " marked")
+  }
+
   function askDelete(row) {
+    // With sessions marked, Del is about them, not the one in hand.
+    if (root.markedShown.length) {
+      root.pendingMany = root.markedShown
+      root.pendingStop = false
+      root.pendingDelete = root.markedShown[0]
+      confirm.selectedIndex = 1
+      confirm.opened = true
+      return
+    }
+    root.pendingMany = []
     if (!row) return
     // A background session has no window to close it in: it is stopped
     // first, after asking, and deleted with the next Del.
@@ -336,12 +385,21 @@ Item {
     confirm.opened = false
     root.pendingDelete = null
     root.pendingStop = false
+    root.pendingMany = []
   }
 
   function confirmDelete() {
     var row = root.pendingDelete
     confirm.opened = false
     if (!row) return
+    if (root.pendingMany.length) {
+      var pairs = root.pendingMany.map(function(marked) { return marked.tool + ":" + marked.id })
+      root.pendingMany = []
+      root.pendingDelete = null
+      deleteManyProc.command = root.scanCommand(["delete-many"].concat(pairs))
+      deleteManyProc.running = true
+      return
+    }
     if (root.pendingStop) {
       root.pendingStop = false
       stopProc.command = root.scanCommand(["stop", row.id])
@@ -357,22 +415,25 @@ Item {
   // stays scrolled where it was, so the selection keeps its place on screen
   // and the next Del doesn't land on something that slid under it.
   function removeRow(id) {
-    var plan = Model.afterRemoval(root.viewRows, id)
+    root.removeRows([id])
+  }
+
+  function removeRows(ids) {
+    var plan = Model.afterRemovals(root.viewRows, ids)
     root.selected = plan.selected
     if (!plan.folding.length) {
-      root.forget(id)
+      root.forget(ids)
       return
     }
-    root.foldingId = id
+    root.foldingIds = ids
     root.folding = plan.folding
     foldTimer.restart()
   }
-
-  function forget(id) {
+  function forget(ids) {
     var y = resultList.contentY
     root.folding = []
-    root.foldingId = ""
-    root.sessions = root.sessions.filter(function(session) { return session.id !== id })
+    root.foldingIds = []
+    root.sessions = root.sessions.filter(function(session) { return ids.indexOf(session.id) === -1 })
     root.refresh()
     resultList.forceLayout()
     resultList.contentY = Math.max(0, Math.min(y, resultList.contentHeight - resultList.height))
@@ -657,7 +718,7 @@ Item {
   Timer {
     id: foldTimer
     interval: 200
-    onTriggered: root.forget(root.foldingId)
+    onTriggered: root.forget(root.foldingIds)
   }
 
   Process {
@@ -698,6 +759,24 @@ Item {
     watchChanges: false
     atomicWrites: true
     printErrors: false
+  }
+
+  Process {
+    id: deleteManyProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var payload = root.parseJson(text) || ({})
+        var deleted = payload.deleted || []
+        var failed = payload.failed || []
+        var next = Object.assign({}, root.marked)
+        for (var i = 0; i < deleted.length; i++) delete next[deleted[i]]
+        root.marked = next
+        if (deleted.length) root.removeRows(deleted)
+        var said = deleted.length === 1 ? "Deleted 1" : "Deleted " + deleted.length
+        root.flash(failed.length ? said + " · " + failed.length + " could not be" : said)
+      }
+    }
   }
 
   Process {
@@ -849,6 +928,11 @@ Item {
             event.accepted = true
             return
           }
+          if (cleanup.opened) {
+            cleanup.handleKey(event)
+            event.accepted = true
+            return
+          }
           if (confirm.opened) {
             if (event.key === Qt.Key_Delete) root.confirmDelete()
             else confirm.handleKey(event)
@@ -857,6 +941,15 @@ Item {
           }
           if (event.key === Qt.Key_Delete) {
             root.askDelete(root.current)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Space && (event.modifiers & Qt.ControlModifier)) {
+            root.markCurrent()
+            event.accepted = true
+          } else if (event.key === Qt.Key_A && (event.modifiers & Qt.ControlModifier)) {
+            root.markAll()
+            event.accepted = true
+          } else if (event.key === Qt.Key_D && (event.modifiers & Qt.ControlModifier)) {
+            cleanup.show(Model.cleanupRules(root.viewRows, Date.now()))
             event.accepted = true
           } else if (event.key === Qt.Key_F2) {
             root.askRename(root.current)
@@ -887,6 +980,7 @@ Item {
             // The filters stay: they are kept for next time.
             if (root.pill >= 0) root.pill = -1
             else if (root.queryText) root.setQuery("")
+            else if (root.markedShown.length) root.marked = ({})
             else root.close()
             event.accepted = true
           } else if (event.key === Qt.Key_Up) {
@@ -987,6 +1081,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: {
               if (root.statusMessage) return root.statusMessage
+              if (root.markedShown.length) return root.markedShown.length + " marked"
               if (root.scanning) return "looking…"
               if (root.count === 0) return ""
               return root.count === 1 ? "1 session" : root.count + " sessions"
@@ -1209,6 +1304,18 @@ Item {
                 font.pixelSize: Style.font.caption
               }
 
+              // Marked for deleting together.
+              Text {
+                visible: !sessionRow.header && sessionRow.entry && !!root.marked[sessionRow.entry.id]
+                x: root.rowInset + (root.titleIndent - width) / 2 - Style.space(2)
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: "✓"
+                color: root.urgentColor
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+              }
+
               // Already running in a window, so Enter focuses it rather than opening one.
               // It breathes while the agent works.
               Rectangle {
@@ -1342,10 +1449,12 @@ Item {
                   if (!pointerGate.moved(sessionRow, mouse)) return
                   root.selected = sessionRow.entry.cursor
                 }
-                onClicked: {
+                // Ctrl+click marks it instead of opening it.
+                onClicked: function(mouse) {
                   if (!sessionRow.entry || sessionRow.header) return
                   root.selected = sessionRow.entry.cursor
-                  root.resume(sessionRow.entry)
+                  if (mouse.modifiers & Qt.ControlModifier) root.marked = Model.toggleMark(root.marked, sessionRow.entry)
+                  else root.resume(sessionRow.entry)
                 }
               }
             }
@@ -1425,7 +1534,7 @@ Item {
           spacing: Style.space(18)
 
           Repeater {
-            model: Model.footerHints(root.current, root.queryText, root.pill, root.peeking)
+            model: Model.footerHints(root.current, root.queryText, root.pill, root.peeking, root.markedShown.length)
 
             Row {
               required property var modelData
@@ -1471,6 +1580,23 @@ Item {
           root.showTool(id)
         }
         onCanceled: toolMenu.opened = false
+      }
+
+      // Ctrl+D: mark sessions by a rule.
+      CleanupDialog {
+        id: cleanup
+        anchors.fill: parent
+        background: root.background
+        foreground: root.foreground
+        selectedBackground: root.selectedBackground
+        selectedText: root.selectedText
+        fontFamily: root.fontFamily
+        cornerRadius: root.cornerRadius
+        onPicked: function(ids) {
+          cleanup.opened = false
+          root.markIds(ids)
+        }
+        onCanceled: cleanup.opened = false
       }
 
       // Ctrl+?: every key.
@@ -1551,6 +1677,7 @@ Item {
         message: {
           var row = root.pendingDelete
           if (!row) return ""
+          if (root.pendingMany.length) return Model.deleteManyText(root.pendingMany)
           if (root.pendingStop)
             return "Stop \u201c" + row.title + "\u201d?\n"
               + "It runs in the background, with no window. The conversation is kept; Del again deletes it."
